@@ -24,8 +24,9 @@
 // MAP.BIN layout (little-endian, every tile starts on a 2048-byte sector):
 //   header  'VMAP' u16 version, u16 tilesX, u16 tilesZ, u16 tileUnits,
 //           u16 headerSectors, u16 maxTileSectors, i32 spawnX, i32 spawnZ,
-//           i16 spawnHeading (4096 = full turn, 0 = north, clockwise), i16 pad,
-//           char name[32], then per tile: u32 sector, u16 sectors, u16 pad
+//           i16 spawnHeading (4096 = full turn, 0 = north, clockwise),
+//           u16 globalSectors, char name[32], u32 globalSector,
+//           then per tile: u32 sector, u16 sectors, u16 pad
 //   tile    u16 nverts, nfaces, nedges, nflat, i16 minX, minZ, maxX, maxZ,
 //           i16 minY (tallest point, negative), u16 pad
 //           verts  nverts x { i16 x, y, z, pad }
@@ -34,6 +35,7 @@
 //           edges  nedges x { i16 x0, z0, x1, z1 }
 //   The first nflat faces lie on the ground (drawn first, by layer); the rest
 //   are depth-sorted.
+//   global  places, minimap road segments and names (see "Places" below)
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -353,23 +355,99 @@ if (spawnName) {
     spawnFrom = spawnName;
   } else console.warn(`spawn "${spawnName}" not found; using the map centre`);
 }
+// Drivable road segments (metres), for snapping, the minimap and street names.
+const drivable = [];
+for (const w of ways.values()) {
+  const k = w.tags.highway && w.tags.highway.replace(/_link$/, '');
+  if (!k || FOOT.has(k) || !ROAD_WIDTH[k] || w.tags.area === 'yes') continue;
+  const pts = wayPts(w);
+  for (let i = 0; i + 1 < pts.length; i++) drivable.push({ a: pts[i], b: pts[i + 1], name: w.tags.name || '', kind: k });
+}
+function nearestRoad([x, z]) {
+  let best = null;
+  for (const { a: [x0, z0], b: [x1, z1] } of drivable) {
+    const dx = x1 - x0, dz = z1 - z0, l2 = dx * dx + dz * dz || 1;
+    const u = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / l2));
+    const px = x0 + dx * u, pz = z0 + dz * u, d = Math.hypot(px - x, pz - z);
+    if (!best || d < best.d) best = { d, p: [px, pz], heading: Math.atan2(dx, dz) };
+  }
+  return best;
+}
 // Move the spawn to the nearest road point so the taxi starts on a street.
 {
-  let best = null;
-  for (const w of ways.values()) {
-    const k = w.tags.highway && w.tags.highway.replace(/_link$/, '');
-    if (!k || FOOT.has(k) || !ROAD_WIDTH[k]) continue;
-    const pts = wayPts(w);
-    for (let i = 0; i + 1 < pts.length; i++) {
-      const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
-      const dx = x1 - x0, dz = z1 - z0, l2 = dx * dx + dz * dz || 1;
-      const u = Math.max(0, Math.min(1, ((spawn[0] - x0) * dx + (spawn[1] - z0) * dz) / l2));
-      const px = x0 + dx * u, pz = z0 + dz * u, d = Math.hypot(px - spawn[0], pz - spawn[1]);
-      if (!best || d < best.d) best = { d, p: [px, pz], heading: Math.atan2(dx, dz) };
-    }
-  }
+  const best = nearestRoad(spawn);
   if (best) { spawn = best.p; spawn.heading = best.heading; }
 }
+
+// ---- Places, minimap roads, names ------------------------------------------------
+//
+// Global section (read into RAM once): u16 nplaces, nsegs, nnames, ntiles,
+//   places  nplaces x { i32 x, z (world units, on the nearest road), u16 name, u8 kind, u8 pad }
+//   buckets ntiles x { u16 first, count }   (segments sorted by tile)
+//   segs    nsegs x { i16 x0, z0, x1, z1 (metres), u16 name (0xffff none), u8 class, u8 pad }
+//   names   nnames x u16 offset (from the start of the name text), then the text (NUL-ended)
+// Names are in the PS1 font's character set: upper case ASCII (e and c with
+// accents, as in Albanian, become E and C).
+
+const ascii = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '').toUpperCase().trim().slice(0, 27);
+const names = [], nameIds = new Map();
+const nameId = (s) => { const a = ascii(s); if (!a) return 0xffff; if (!nameIds.has(a)) { nameIds.set(a, names.length); names.push(a); } return nameIds.get(a); };
+
+// Place kinds: 0 = destination, 1 = fuel station, 2 = car repair.
+const PLACE_KEYS = ['amenity', 'shop', 'tourism', 'office', 'leisure', 'historic', 'public_transport', 'craft', 'healthcare'];
+const placeKind = (t) => t.amenity === 'fuel' ? 1 : t.shop === 'car_repair' || t.craft === 'car_repair' ? 2 : 0;
+const places = [], seenPlace = new Set();
+function addPlace(tags, pt) {
+  const isPlace = tags.name && (PLACE_KEYS.some((k) => tags[k]) || (tags.building && tags.building !== 'yes'));
+  const kind = placeKind(tags);
+  if (!pt || (!isPlace && !kind)) return;
+  const road = nearestRoad(pt);
+  if (!road || road.d > 60) return;            // too far from a street to drive to
+  const label = tags.name || (kind === 1 ? 'Fuel' : 'Mechanic');
+  const key = ascii(label) + Math.round(road.p[0] / 20) + ',' + Math.round(road.p[1] / 20);
+  if (seenPlace.has(key)) return;
+  seenPlace.add(key);
+  places.push({ x: Math.round(road.p[0] * UNIT), z: Math.round(road.p[1] * UNIT), name: nameId(label), kind });
+}
+for (const [id, t] of nodeTags) addPlace(t, toXZ(id));
+for (const w of ways.values()) if (w.tags.name || placeKind(w.tags)) {
+  const pts = closed(w) ? ring(w) : wayPts(w);
+  if (pts.length) addPlace(w.tags, [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length]);
+}
+
+// Minimap / street-name segments, split to <= 32 m and bucketed by tile.
+const segs = [];
+for (const { a: [x0, z0], b: [x1, z1], name, kind } of drivable) {
+  const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / EDGE_PIECE));
+  const cls = ['motorway', 'trunk', 'primary'].includes(kind) ? 2 : ['secondary', 'tertiary'].includes(kind) ? 1 : 0;
+  for (let k = 0; k < n; k++) {
+    const ax = x0 + (x1 - x0) * k / n, az = z0 + (z1 - z0) * k / n, bx = x0 + (x1 - x0) * (k + 1) / n, bz = z0 + (z1 - z0) * (k + 1) / n;
+    segs.push({ c: [ax, az, bx, bz].map(Math.round), name: name ? nameId(name) : 0xffff, cls, tile: tileAt((ax + bx) / 2, (az + bz) / 2) });
+  }
+}
+segs.sort((a, b) => (a.tile.tz * tilesX + a.tile.tx) - (b.tile.tz * tilesX + b.tile.tx));
+if (places.length > 4000 || segs.length > 20000 || names.length > 4000) throw new Error('too many places, road segments or names');
+
+function globalBlob() {
+  const text = names.map((n) => Buffer.from(n + '\0', 'latin1'));
+  const textBytes = text.reduce((s, b) => s + b.length, 0);
+  const size = 8 + places.length * 12 + tiles.length * 4 + segs.length * 12 + names.length * 2 + textBytes;
+  const buf = Buffer.alloc((size + 3) & ~3);
+  let o = 0;
+  for (const v of [places.length, segs.length, names.length, tiles.length]) { buf.writeUInt16LE(v, o); o += 2; }
+  for (const p of places) { buf.writeInt32LE(p.x, o); buf.writeInt32LE(p.z, o + 4); buf.writeUInt16LE(p.name, o + 8); buf.writeUInt8(p.kind, o + 10); o += 12; }
+  const first = new Array(tiles.length).fill(0), count = new Array(tiles.length).fill(0);
+  segs.forEach((sg, i) => { const t = sg.tile.tz * tilesX + sg.tile.tx; if (!count[t]) first[t] = i; count[t]++; });
+  for (let t = 0; t < tiles.length; t++) { buf.writeUInt16LE(first[t], o); buf.writeUInt16LE(count[t], o + 2); o += 4; }
+  for (const sg of segs) { sg.c.forEach((v, k) => buf.writeInt16LE(v, o + k * 2)); buf.writeUInt16LE(sg.name, o + 8); buf.writeUInt8(sg.cls, o + 10); o += 12; }
+  let off = 0;
+  for (const b of text) { buf.writeUInt16LE(off, o); o += 2; off += b.length; }
+  for (const b of text) { b.copy(buf, o); o += b.length; }
+  return buf;
+}
+const global = globalBlob();
+const MAX_GLOBAL_BYTES = 96 * 1024;  // must match GLOBAL_BYTES in src/world.c
+if (global.length > MAX_GLOBAL_BYTES) throw new Error(`places/roads/names take ${global.length} bytes (max ${MAX_GLOBAL_BYTES})`);
 
 // ---- Write ----------------------------------------------------------------------
 
@@ -408,7 +486,9 @@ const header = Buffer.alloc(headerSectors * SECTOR);
 header.write('VMAP', 0, 'ascii');
 let sector = headerSectors, maxSectors = 0;
 const index = tileBlobs.map((blob) => { const n = Math.ceil(blob.length / SECTOR); const e = [sector, n]; sector += n; maxSectors = Math.max(maxSectors, n); return e; });
-header.writeUInt16LE(1, 4);
+const globalSector = sector, globalSectors = Math.ceil(global.length / SECTOR);
+sector += globalSectors;
+header.writeUInt16LE(2, 4);
 header.writeUInt16LE(tilesX, 6);
 header.writeUInt16LE(tilesZ, 8);
 header.writeUInt16LE(TILE, 10);
@@ -417,12 +497,15 @@ header.writeUInt16LE(maxSectors, 14);
 header.writeInt32LE(Math.round(spawn[0] * UNIT), 16);
 header.writeInt32LE(Math.round(spawn[1] * UNIT), 20);
 header.writeInt16LE(Math.round(((spawn.heading ?? 0) / (2 * Math.PI)) * 4096) & 4095, 24);
+header.writeUInt16LE(globalSectors, 26);
 header.write(mapLabel.toUpperCase().slice(0, 31), 28, 'latin1');
+header.writeUInt32LE(globalSector, 60);
 index.forEach(([s, n], i) => { header.writeUInt32LE(s, 64 + i * 8); header.writeUInt16LE(n, 68 + i * 8); });
 
 const out = Buffer.alloc(sector * SECTOR);
 header.copy(out, 0);
 tileBlobs.forEach((blob, i) => blob.copy(out, index[i][0] * SECTOR));
+global.copy(out, globalSector * SECTOR);
 writeFileSync(outPath, out);
 
 const report = {
@@ -431,6 +514,8 @@ const report = {
   buildingsWithColour: stats.colouredBuildings, roads: stats.roads, roadKm: +stats.roadKm.toFixed(2), areas: stats.areas,
   streetNames: stats.names.size, spawn: { from: spawnFrom, metres: spawn.map((v) => +v.toFixed(1)) },
   largestTile: { at: worst, bytes: maxBytes, maxVerts }, fileBytes: out.length,
+  places: places.length, fuelStations: places.filter((p) => p.kind === 1).length, mechanics: places.filter((p) => p.kind === 2).length,
+  minimapSegments: segs.length, globalBytes: global.length,
 };
-if (reportPath) writeFileSync(reportPath, JSON.stringify({ ...report, streetNameList: [...stats.names].sort() }, null, 2));
-console.log(`osm2map: ${report.buildings} buildings (${report.buildingsWithDefaultHeight} with a guessed height), ${report.roads} roads (${report.roadKm} km), ${report.areas} areas, ${tilesX}x${tilesZ} tiles, largest tile ${maxBytes} bytes, ${out.length} bytes total`);
+if (reportPath) writeFileSync(reportPath, JSON.stringify({ ...report, streetNameList: [...stats.names].sort(), placeList: places.map((p) => names[p.name]) }, null, 2));
+console.log(`osm2map: ${report.buildings} buildings (${report.buildingsWithDefaultHeight} with a guessed height), ${report.roads} roads (${report.roadKm} km), ${report.areas} areas, ${report.places} places (${report.fuelStations} fuel, ${report.mechanics} mechanics), ${tilesX}x${tilesZ} tiles, largest tile ${maxBytes} bytes, ${out.length} bytes total`);

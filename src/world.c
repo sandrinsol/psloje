@@ -47,11 +47,16 @@ typedef struct {
 	char magic[4];
 	uint16_t version, tiles_x, tiles_z, tile_units, header_sectors, max_sectors;
 	int32_t spawn_x, spawn_z;
-	int16_t spawn_heading, pad;
+	int16_t spawn_heading;
+	uint16_t global_sectors;
 	char name[32];
+	uint32_t global_sector;
 } MapHeader;
 
+#define GLOBAL_BYTES (96 * 1024)   /* must match tools/osm2map.mjs */
+
 Colour fog_colour = { 172, 190, 204 };
+Colour light = { 128, 128, 128 };
 char map_name[32];
 volatile int32_t tiles_loaded, tiles_drawn, faces_drawn, cd_errors;
 
@@ -62,6 +67,16 @@ static int map_lba;
 static Slot slots[NUM_SLOTS];
 static uint32_t slot_data[NUM_SLOTS][TILE_SLOT_BYTES / 4];
 static int reading = -1;   /* slot being read, or -1 */
+
+static uint32_t global_data[GLOBAL_BYTES / 4];
+const Place *places;
+int num_places;
+static const RoadSeg *segs;
+static int num_segs;
+static const uint16_t *seg_bucket;   /* per tile: first, count */
+static const uint16_t *name_offsets;
+static const char *name_text;
+static int num_names;
 
 static uint16_t tpage;
 static uint16_t clut;
@@ -110,7 +125,8 @@ int world_init(void) {
 	if (!cd_read(map_lba, 1, sector))
 		return 0;
 	memcpy(&header, sector, sizeof(header));
-	if (memcmp(header.magic, "VMAP", 4) || header.tiles_x * header.tiles_z > MAX_TILES)
+	if (memcmp(header.magic, "VMAP", 4) || header.version < 2 || header.tiles_x * header.tiles_z > MAX_TILES ||
+	    header.global_sectors * SECTOR > GLOBAL_BYTES)
 		return 0;
 	memcpy(map_name, header.name, sizeof(map_name) - 1);
 
@@ -126,9 +142,70 @@ int world_init(void) {
 			index_count[t] = p[off + 4] | p[off + 5] << 8;
 		}
 	}
+	/* Places, minimap roads and names: read once, kept in RAM. */
+	if (header.global_sectors) {
+		if (!cd_read(map_lba + header.global_sector, header.global_sectors, global_data))
+			return 0;
+		const uint16_t *g = (const uint16_t *)global_data;
+		num_places = g[0];
+		num_segs = g[1];
+		num_names = g[2];
+		const uint8_t *p = (const uint8_t *)global_data + 8;
+		places = (const Place *)p;
+		p += num_places * sizeof(Place);
+		seg_bucket = (const uint16_t *)p;
+		p += g[3] * 4;
+		segs = (const RoadSeg *)p;
+		p += num_segs * sizeof(RoadSeg);
+		name_offsets = (const uint16_t *)p;
+		name_text = (const char *)(p + num_names * 2);
+	}
 	for (int i = 0; i < NUM_SLOTS; i++)
 		slots[i].state = SLOT_EMPTY;
 	return 1;
+}
+
+const char *world_name(int id) {
+	if (id < 0 || id >= num_names)
+		return "";
+	return name_text + name_offsets[id];
+}
+
+void world_segments(int32_t x, int32_t z, int radius_tiles, void (*fn)(const RoadSeg *, void *), void *arg) {
+	if (!segs)
+		return;
+	int ctx = x / TILE_UNITS, ctz = z / TILE_UNITS;
+	for (int tz = ctz - radius_tiles; tz <= ctz + radius_tiles; tz++) {
+		if (tz < 0 || tz >= header.tiles_z) continue;
+		for (int tx = ctx - radius_tiles; tx <= ctx + radius_tiles; tx++) {
+			if (tx < 0 || tx >= header.tiles_x) continue;
+			const uint16_t *b = seg_bucket + (tz * header.tiles_x + tx) * 2;
+			for (int i = 0; i < b[1]; i++)
+				fn(&segs[b[0] + i], arg);
+		}
+	}
+}
+
+typedef struct { int32_t x, z, best; int name; } NearestArg;
+
+static void nearest_seg(const RoadSeg *sg, void *arg) {
+	NearestArg *a = arg;
+	if (sg->name == 0xffff) return;
+	/* metres, relative to the point */
+	int32_t ax = sg->x0 - a->x, az = sg->z0 - a->z, bx = sg->x1 - a->x, bz = sg->z1 - a->z;
+	int32_t ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez;
+	int32_t t = l2 ? (-(ax * ex + az * ez)) * 256 / l2 : 0;
+	if (t < 0) t = 0;
+	if (t > 256) t = 256;
+	int32_t cx = ax + (ex * t >> 8), cz = az + (ez * t >> 8);
+	int32_t d = cx * cx + cz * cz;
+	if (d < a->best) { a->best = d; a->name = sg->name; }
+}
+
+const char *world_street_at(int32_t x, int32_t z) {
+	NearestArg a = { x / UNIT, z / UNIT, 25 * 25, -1 };   /* within 25 m */
+	world_segments(x, z, 1, nearest_seg, &a);
+	return a.name < 0 ? "" : world_name(a.name);
 }
 
 void world_spawn(int32_t *x, int32_t *z, int *heading) {
@@ -273,11 +350,15 @@ static inline void fogged(uint8_t *out, const uint8_t *c, int z) {
  * by the face colour (128 = unchanged). */
 static void base_colour(const Face *f, uint8_t *c) {
 	int tex = f->texlayer & 15;
-	if (tex >= NUM_TEXTURES) {
-		c[0] = f->r; c[1] = f->g; c[2] = f->b;
-		return;
+	int r = f->r, g = f->g, b = f->b;
+	if (tex < NUM_TEXTURES) {
+		r = texture_avg[tex][0] * r >> 7;
+		g = texture_avg[tex][1] * g >> 7;
+		b = texture_avg[tex][2] * b >> 7;
 	}
-	int r = texture_avg[tex][0] * f->r >> 7, g = texture_avg[tex][1] * f->g >> 7, b = texture_avg[tex][2] * f->b >> 7;
+	r = r * light.r >> 7;
+	g = g * light.g >> 7;
+	b = b * light.b >> 7;
 	c[0] = r > 255 ? 255 : r; c[1] = g > 255 ? 255 : g; c[2] = b > 255 ? 255 : b;
 }
 
@@ -314,7 +395,7 @@ static void emit(const Face *f, DVECTOR *p, int32_t *z, int u0, int v0, int u1, 
 		if (p[i].vy < ymin) ymin = p[i].vy;
 		if (p[i].vy > ymax) ymax = p[i].vy;
 	}
-	if (xmax < 0 || xmin > 320 || ymax < 0 || ymin > 240 || xmax - xmin > 1023 || ymax - ymin > 511)
+	if (xmax < 0 || xmin >= 320 || ymax < 0 || ymin >= 240 || xmax - xmin > 1023 || ymax - ymin > 511)
 		return;
 	if (prim + sizeof(POLY_GT4) > prim_end)
 		return;
@@ -325,7 +406,7 @@ static void emit(const Face *f, DVECTOR *p, int32_t *z, int u0, int v0, int u1, 
 		setXY4(q, p[0].vx, p[0].vy, p[1].vx, p[1].vy, p[2].vx, p[2].vy, p[3].vx, p[3].vy);
 		int tu = (tex & 1) * 64, tv = (tex >> 1) * 64;
 		setUV4(q, tu + u0, tv + v0, tu + u1, tv + v0, tu + u0, tv + v1, tu + u1, tv + v1);
-		setRGB0(q, f->r, f->g, f->b);
+		setRGB0(q, f->r * light.r >> 7, f->g * light.g >> 7, f->b * light.b >> 7);
 		q->tpage = tpage;
 		q->clut = clut;
 		addPrim(ot, q);

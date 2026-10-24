@@ -20,7 +20,7 @@ project(
 	DESCRIPTION "VLORA TAXI"
 )
 
-psn00bsdk_add_executable(game GPREL src/main.c src/world.c src/car.c)
+psn00bsdk_add_executable(game GPREL src/main.c src/world.c src/car.c src/game.c)
 target_compile_options(game PRIVATE -O2 -fno-ipa-ra)
 # Debian/Ubuntu's mipsel-linux-gnu libgcc is built for MIPS32r2 with hard-float
 # helpers, which the PS1 can't run. Link libmips1rt (64-bit maths and soft-float

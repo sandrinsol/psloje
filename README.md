@@ -6,7 +6,7 @@ Mercedes-Benz W124 taxi through the city's real streets, built from
 [PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK) and tested with the
 [ps1-test](https://github.com/sandrinsol/ps1-test) emulator harness and MCP server.
 
-**Status: milestone 1 (drive around the centre), running on a made-up test
+**Status: driving, fares and day/night work, running on a made-up test
 town.** The real Vlora map needs an OpenStreetMap export in `data/vlora.osm`
 (see [Map data](#map-data)); until then the game says `TEST TOWN (NOT VLORA)`.
 
@@ -17,13 +17,24 @@ town.** The real Vlora map needs an OpenStreetMap export in `data/vlora.osm`
 | D-pad left/right or left stick | Steer |
 | Square | Handbrake |
 
+**Fares.** A passenger waits at a place from the map (green column, green
+arrow and minimap dot). Stop next to them and they get in; drive to their
+destination (orange column) and stop. The meter starts at 300 Lek and adds
+120 Lek per km; arriving fast without hitting walls earns a tip. The HUD
+shows the clock, your money, the fare, the street you're on and a
+heading-up minimap.
+
+**Time of day.** The shift starts at 07:00 and a game minute passes every
+second: the light and the sky follow, with a dusk at about 19:30 and night
+from 20:30, when the headlights, tail lights and the TAXI sign glow.
 ## Plan
 
-1. **Drive around the centre** (now): chase camera, the city streamed from the
-   CD in 64 m tiles, buildings you can't drive through, fog, 30 fps.
-2. The whole Lungomare out to Uji i Ftohtë, and a day/night cycle.
+1. Drive around the centre: chase camera, the city streamed from the CD in
+   64 m tiles, buildings you can't drive through, fog, 30 fps. **Done.**
+2. Day/night cycle **(done)**; the whole Lungomare out to Uji i Ftohtë (needs
+   the map data).
 3. Fares: passengers, the meter, money, a minimap with the destination arrow,
-   street names on the HUD.
+   street names on the HUD. **Done.**
 4. Fuel and a gas station, damage and the mechanic, saves on the memory card.
 5. Traffic: AI cars, traffic lights, rules and fines.
 6. Car radio and sound effects.
@@ -49,6 +60,11 @@ From the data the converter takes:
   footways and pedestrian streets in paving.
 - **Areas**: parks, grass, pitches, water, beaches, parking, squares.
 - **Collision**: the outlines of the buildings.
+- **Places** for fares: named shops, cafés, hotels, schools, offices and other
+  named features within 60 m of a street (moved onto the street), plus fuel
+  stations (`amenity=fuel`) and mechanics (`shop=car_repair`) for later.
+- **Minimap and street names**: the drivable roads and their `name=`. Albanian
+  letters become plain capitals for the PS1 font (ë → E, ç → C).
 
 The build writes `build/map-report.json` (buildings, guessed heights, roads,
 street names, tile sizes). Not yet handled: the coastline (the sea), terrain
@@ -65,7 +81,7 @@ must credit it (planned for the credits screen).
 | Build | `cmake --preset default && cmake --build build` → `build/game.cue` + `game.bin` (bootable disc, with `MAP.BIN`), `build/game.exe`, `build/game.elf` (symbols) |
 | Needs | PSn00bSDK with `PSN00BSDK_LIBS` set, a MIPS GCC (`mipsel-none-elf`, or Debian/Ubuntu's `gcc-mipsel-linux-gnu`), CMake, Ninja and Node.js — `.devcontainer/install-psn00bsdk.sh` installs the SDK and compiler |
 | Play | Load `build/game.cue` in a PS1 emulator, e.g. the ps1-test web player (**Load disc or EXE**) |
-| Test | `tests/ps1/smoke.json` (boot, stream the city, accelerate, brake), run by the `ps1-tests` workflow or `node <ps1-test>/harness/runner.mjs tests/ps1/smoke.json` |
+| Test | `tests/ps1/smoke.json` (boot, stream the city, a fare offered, accelerate, brake, night), run by the `ps1-tests` workflow or `node <ps1-test>/harness/runner.mjs tests/ps1/smoke.json` |
 
 Generated files, committed so the build doesn't need to regenerate them:
 
@@ -85,6 +101,8 @@ Generated files, committed so the build doesn't need to regenerate them:
   collisions.
 - `src/car.c`: W124 physics (speed-dependent steering, grip, handbrake drift,
   sliding along walls), chase camera, car drawing.
+- `src/game.c`: clock and day/night light, fares and the meter, passenger and
+  destination markers, headlights, HUD, minimap, destination arrow.
 
 Two PS1 details worth knowing:
 
@@ -98,5 +116,5 @@ Two PS1 details worth knowing:
   `gte_load_matrix()`, a real function call, instead.
 
 `ps1test.json` tells the ps1-test harness how to build and load the game and
-which variables to watch. The golden image in `tests/ps1/goldens/` is
-recreated on the first run; delete it when the map changes.
+which variables to watch. The golden images in `tests/ps1/goldens/` are
+recreated on the first run; delete them when the map changes.

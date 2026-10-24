@@ -273,6 +273,46 @@
   <node id="341" lat="0.0026279" lon="0.0026170">
     <tag k="name" v="Test Square"/>
   </node>
+  <node id="342" lat="0.0018501" lon="0.0015390">
+    <tag k="name" v="Test Hotel"/>
+    <tag k="tourism" v="hotel"/>
+  </node>
+  <node id="343" lat="0.0012351" lon="0.0022576">
+    <tag k="name" v="Test Cafe"/>
+    <tag k="amenity" v="cafe"/>
+  </node>
+  <node id="344" lat="0.0018501" lon="0.0029763">
+    <tag k="name" v="Test School"/>
+    <tag k="amenity" v="school"/>
+  </node>
+  <node id="345" lat="0.0012351" lon="0.0036949">
+    <tag k="name" v="Test Market"/>
+    <tag k="shop" v="supermarket"/>
+  </node>
+  <node id="346" lat="0.0025736" lon="0.0015390">
+    <tag k="name" v="Test Clinic"/>
+    <tag k="amenity" v="clinic"/>
+  </node>
+  <node id="347" lat="0.0019586" lon="0.0022576">
+    <tag k="name" v="Test Bank"/>
+    <tag k="amenity" v="bank"/>
+  </node>
+  <node id="348" lat="0.0025736" lon="0.0029763">
+    <tag k="name" v="Test Museum"/>
+    <tag k="tourism" v="museum"/>
+  </node>
+  <node id="349" lat="0.0019586" lon="0.0036949">
+    <tag k="name" v="Test Bakery"/>
+    <tag k="shop" v="bakery"/>
+  </node>
+  <node id="350" lat="0.0032971" lon="0.0015390">
+    <tag k="name" v="Test Fuel"/>
+    <tag k="amenity" v="fuel"/>
+  </node>
+  <node id="351" lat="0.0026821" lon="0.0022576">
+    <tag k="name" v="Test Garage"/>
+    <tag k="shop" v="car_repair"/>
+  </node>
   <way id="26">
     <nd ref="1"/>
     <nd ref="2"/>

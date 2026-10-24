@@ -2,17 +2,20 @@
  * VLORA TAXI: drive a Mercedes W124 taxi through Vlora, Albania, built from
  * OpenStreetMap data (tools/osm2map.mjs) and streamed from the CD.
  *
- * Milestone 1: drive around the city centre. R2 accelerates, L2 brakes and
- * reverses, the D-pad or the left stick steers, Square is the handbrake.
+ * Drive with R2 (gas), L2 (brake, reverse), the D-pad or left stick (steer)
+ * and Square (handbrake). Pick up passengers and take them where they want
+ * to go (game.c). The day goes by at a minute a second.
  *
  * Variables the test harness reads by name (see ps1test.json):
  *   frame_count    incremented once per drawn frame (lag detection)
  *   cpu_usage      % of the 30 fps frame budget (two VSyncs) the last frame used
  *   taxi           the car (position, speed, heading: see car.h)
  *   speed_kmh, fps, tiles_loaded, tiles_drawn, faces_drawn, cd_errors
+ *   game_minutes, money, fare_state, meter, fares_done (game.h)
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <psxgpu.h>
 #include <psxgte.h>
 #include <inline_c.h>
@@ -22,6 +25,7 @@
 #include <hwregs_c.h>
 #include "world.h"
 #include "car.h"
+#include "game.h"
 
 #define SCREEN_W 320
 #define SCREEN_H 240
@@ -95,36 +99,6 @@ static void read_pad(void) {
 	}
 }
 
-static uint8_t *text(uint32_t *ot, uint8_t *prim, int x, int y, const char *s) {
-	return FntSort(ot, prim, x, y, s);
-}
-
-static uint8_t *draw_hud(uint32_t *ot, uint8_t *prim) {
-	char line[64];
-	sprintf(line, "%s", map_name);
-	prim = text(ot, prim, 8, 8, line);
-	sprintf(line, "%3d KM/H", speed_kmh);
-	prim = text(ot, prim, 248, 8, line);
-	sprintf(line, "FPS %2d  TILES %2d  POLYS %4d", fps, tiles_drawn, faces_drawn);
-	prim = text(ot, prim, 8, 224, line);
-	/* Dark strips behind the text. */
-	for (int i = 0; i < 2; i++) {
-		TILE *t = (TILE *)prim;
-		setTile(t);
-		setXY0(t, 0, i ? 220 : 4);
-		setWH(t, SCREEN_W, 16);
-		setRGB0(t, 24, 28, 36);
-		setSemiTrans(t, 1);
-		addPrim(ot, t);
-		prim += sizeof(TILE);
-	}
-	DR_TPAGE *tp = (DR_TPAGE *)prim;   /* semi-transparency mode 0: 50% */
-	setDrawTPage(tp, 0, 1, getTPage(0, 0, 0, 0));
-	addPrim(ot, tp);
-	prim += sizeof(DR_TPAGE);
-	return prim;
-}
-
 int main(int argc, const char **argv) {
 	init();
 	map_ok = world_init();
@@ -150,6 +124,7 @@ int main(int argc, const char **argv) {
 	car_reset(&taxi, sx, sz, sh);
 	world_stream(sx, sz, 1);
 	car_camera(&taxi, &camera, 1);
+	game_init();
 
 	int last_vsync = VSync(-1), fps_frames = 0, fps_start = last_vsync;
 	for (;;) {
@@ -173,6 +148,7 @@ int main(int argc, const char **argv) {
 			car_camera(&taxi, &camera, 0);
 		}
 		speed_kmh = car_kmh(&taxi);
+		game_update(&taxi, ticks);
 
 		world_stream(CAR_TO_WORLD(taxi.x), CAR_TO_WORLD(taxi.z), 0);
 
@@ -180,7 +156,12 @@ int main(int argc, const char **argv) {
 		uint8_t *prim = b->prims, *end = b->prims + PRIM_LEN - 4096;
 		prim = world_draw(&camera, b->ot, prim, end);
 		prim = car_draw(&taxi, &camera, b->ot, prim);
-		prim = draw_hud(b->ot, prim);
+		prim = game_draw_world(&taxi, &camera, b->ot, prim);
+		prim = game_draw_hud(&taxi, &camera, b->ot, prim);
+		if (frame_count < 150) {
+			/* The map's name for the first seconds. */
+			prim = FntSort(b->ot, prim, 160 - 4 * (int)strlen(map_name), 112, map_name);
+		}
 
 		frame_count++;
 		fps_frames++;
@@ -195,6 +176,7 @@ int main(int argc, const char **argv) {
 		VSync(0);
 		TIMER_VALUE(1) = 0;
 		PutDispEnv(&b->disp);
+		setRGB0(&b->draw, fog_colour.r, fog_colour.g, fog_colour.b);   /* sky = fog, by time of day */
 		PutDrawEnv(&b->draw);
 		DrawOTag(b->ot + OT_LEN - 1);
 		active ^= 1;
