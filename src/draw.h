@@ -2,8 +2,8 @@
 #pragma once
 #include <stdint.h>
 
-/* Ordering table layers: higher = drawn first (further back). */
-enum { L_HUD = 0, L_EFFECTS = 2, L_ACTORS = 4, L_TELEGRAPH = 7, L_TILES = 9, L_VOID = 12, OT_LEN = 14 };
+/* Ordering table: depth-sorted 3D, the HUD in the first slots. */
+#define OT_LEN 1024
 
 typedef struct {
 	uint8_t r, g, b;

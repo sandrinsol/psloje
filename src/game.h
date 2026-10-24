@@ -1,9 +1,11 @@
 /*
  * GRID SOULS: the trial's rules. Everything runs in 1/60 s frames.
  *
- * The floor is an empty N x N grid (x right, y down, 0..N-1). The player
- * only moves by dodging (Circle) one tile; the D-pad turns. Enemies light
- * up the tiles they're about to hit: faint first, bright just before.
+ * The floor is an empty N x N grid (x right, y down = towards the start,
+ * 0..N-1; facing 0 = up the grid). The player only moves by dodging
+ * (Circle) one tile; the D-pad turns, relative to the soul (Left / Right a
+ * quarter, Down around). Enemies light up the tiles they're about to hit:
+ * faint first, bright just before.
  */
 #pragma once
 #include <stdint.h>
@@ -37,7 +39,7 @@ typedef struct {
 	int32_t buffered, buffer_t; /* a dodge/attack pressed while busy */
 	int32_t buffer_dir;
 	int32_t dodge_dir;
-	int32_t prev_facing, turned_dir; /* the last turn, while its direction is held (-1: none) */
+	int32_t prev_facing, turned_dir; /* the last turn's key (relative), while held (-1: none) */
 } Player;
 
 /* Enemy states. */
@@ -63,6 +65,18 @@ extern volatile int32_t drop_x, drop_y, drop_amount;   /* absolution left on the
 extern int32_t message_t;
 extern const char *message;
 extern int32_t shake_t;
+extern int32_t hitstop_t;
+extern int32_t floor_t;     /* frames in the floor's current state */   /* frames the game stays frozen (hit-stop) */
+
+/* What happened this frame, for sounds and effects. */
+enum { EV_TURN, EV_DODGE, EV_SWING, EV_HIT, EV_RIPOSTE, EV_KILL, EV_BLOCK, EV_PARRY, EV_HURT,
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR };
+typedef struct {
+	int16_t type, x, y;   /* tile */
+} GameEvent;
+#define MAX_EVENTS 16
+extern GameEvent game_events[MAX_EVENTS];
+extern int32_t num_events;
 
 /* Floor states. */
 enum { F_WAVE_INTRO, F_FIGHT, F_CLEARED, F_DEAD };

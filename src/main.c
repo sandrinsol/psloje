@@ -8,23 +8,25 @@
  * Runs at 60 fps: one game frame per VSync.
  *
  * Variables the test harness reads by name (see ps1test.json):
- *   frame_count, cpu_usage, fps
+ *   boot_magic, frame_count, cpu_usage, fps
  *   player (game.h), wave, enemies_alive, absolution, guilt, floor_state,
  *   drop_x, drop_y, drop_amount
  */
 #include <stdint.h>
 #include <psxgpu.h>
 #include <psxgte.h>
+#include <inline_c.h>
 #include <psxpad.h>
 #include <psxapi.h>
 #include <psxetc.h>
 #include <hwregs_c.h>
 #include "game.h"
 #include "draw.h"
+#include "audio.h"
 
 #define SCREEN_W 320
 #define SCREEN_H 240
-#define PRIM_LEN (48 * 1024)
+#define PRIM_LEN (96 * 1024)
 
 typedef struct {
 	DISPENV disp;
@@ -37,6 +39,7 @@ static Buffer buffers[2];
 static int active;
 
 volatile uint32_t frame_count;
+volatile uint32_t boot_magic;   /* 0x51D50001 once main() runs: tests wait for it */
 volatile int32_t cpu_usage;
 volatile int32_t fps;
 
@@ -58,8 +61,11 @@ static void init(void) {
 	PutDrawEnv(&buffers[0].draw);
 
 	FntLoad(960, 0);
-	InitGeom();   /* isin / icos */
+	InitGeom();
+	gte_SetGeomOffset(SCREEN_W / 2, SCREEN_H / 2);
+	gte_SetGeomScreen(170);
 	draw_init();
+	audio_init();   /* before the pads: SpuInit() hangs after StartPAD() */
 
 	InitPAD(pad_buffers[0], 34, pad_buffers[1], 34);
 	StartPAD();
@@ -83,6 +89,7 @@ static Input read_pad(void) {
 }
 
 int main(int argc, const char **argv) {
+	boot_magic = 0x51D50001;
 	init();
 	game_start_floor(0);
 
@@ -91,6 +98,7 @@ int main(int argc, const char **argv) {
 		Buffer *b = &buffers[active];
 		Input in = read_pad();
 		game_update(&in);
+		audio_events();
 
 		ClearOTagR(b->ot, OT_LEN);
 		draw_frame(b->ot, b->prims, b->prims + PRIM_LEN - 1024, frame_count);

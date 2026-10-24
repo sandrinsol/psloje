@@ -50,7 +50,25 @@ volatile int32_t drop_x = -1, drop_y = -1, drop_amount;
 int32_t message_t;
 const char *message;
 int32_t shake_t;
-static int32_t state_t;
+int32_t hitstop_t;
+GameEvent game_events[MAX_EVENTS];
+int32_t num_events;
+int32_t floor_t;   /* frames in the floor's current state */
+
+static uint16_t held_pressed;   /* buttons pressed during a hit-stop */
+
+static void emit(int type, int x, int y) {
+	if (num_events < MAX_EVENTS) {
+		game_events[num_events].type = type;
+		game_events[num_events].x = x;
+		game_events[num_events].y = y;
+		num_events++;
+	}
+}
+
+static void hitstop(int frames) {
+	if (frames > hitstop_t) hitstop_t = frames;
+}
 
 static const int8_t DX[4] = { 0, 1, 0, -1 }, DY[4] = { -1, 0, 1, 0 };
 
@@ -105,7 +123,7 @@ void game_start_floor(int keep_drop) {
 	wave = 0;
 	enemies_alive = 0;
 	floor_state = F_WAVE_INTRO;
-	state_t = 0;
+	floor_t = 0;
 	say("FLOOR I  -  SLOTH", 120);
 }
 
@@ -141,9 +159,10 @@ static void die(void) {
 	player.state = P_DEAD;
 	player.t = 0;
 	floor_state = F_DEAD;
-	state_t = 0;
+	floor_t = 0;
 	shake_t = 20;
 	say("JUDGED", 0);
+	emit(EV_DEATH, player.x, player.y);
 }
 
 /* An attack from (ex, ey) lands on the player's tile. Returns 1 if parried. */
@@ -162,12 +181,15 @@ static int player_hit(int ex, int ey, int damage) {
 		player.parry_t = 999;
 		player.parried_t = 0;
 		shake_t = 6;
+		hitstop(6);
+		emit(EV_PARRY, ex, ey);
 		return 1;
 	}
 	if (ready && player.blocking) {
 		player.stamina -= BLOCK_COST;
 		player.stamina_wait = STAMINA_WAIT;
 		shake_t = 4;
+		emit(EV_BLOCK, px, py);
 		if (player.stamina >= 0)
 			return 0;   /* held */
 		player.stamina = 0;
@@ -178,6 +200,8 @@ static int player_hit(int ex, int ey, int damage) {
 	player.hp -= damage;
 	player.hurt_t = 0;
 	shake_t = 10;
+	hitstop(5);
+	emit(EV_HURT, px, py);
 	if (player.state == P_DRINK) {
 		player.state = P_IDLE;   /* the flask is spilled */
 		player.t = 0;
@@ -212,6 +236,7 @@ static int try_dodge(int dir) {
 	player.t = 0;
 	player.stamina -= DODGE_COST;
 	player.stamina_wait = STAMINA_WAIT;
+	emit(EV_DODGE, nx, ny);
 	return 1;
 }
 
@@ -222,6 +247,7 @@ static int try_attack(void) {
 	player.t = 0;
 	player.stamina -= ATTACK_COST;
 	player.stamina_wait = STAMINA_WAIT;
+	emit(EV_SWING, player.x, player.y);
 	return 1;
 }
 
@@ -235,11 +261,14 @@ static void sword_hits(void) {
 	e->hp -= ATTACK_DAMAGE * (riposte ? RIPOSTE_FACTOR : 1);
 	e->hit_t = 0;
 	shake_t = riposte ? 8 : 3;
+	hitstop(riposte ? 9 : 4);
+	emit(riposte ? EV_RIPOSTE : EV_HIT, tx, ty);
 	if (e->hp <= 0) {
 		e->state = E_DYING;
 		e->t = 0;
 		absolution += HUSK_REWARD;
 		enemies_alive--;
+		emit(EV_KILL, tx, ty);
 	} else if (riposte) {
 		e->state = E_IDLE;
 		e->t = 0;
@@ -258,6 +287,7 @@ static void update_player(const Input *in) {
 	if (p->state == P_DEAD)
 		return;
 
+	/* The D-pad is relative to the soul: Up = ahead, Right, Down = behind, Left. */
 	int pressed_dir = dir_of(in->pressed), held_dir = dir_of(in->held);
 	static const uint16_t BIT[4] = { PAD_UP, PAD_RIGHT, PAD_DOWN, PAD_LEFT };
 	if (p->turned_dir >= 0 && !(in->held & BIT[p->turned_dir])) p->turned_dir = -1;   /* let go */
@@ -283,7 +313,7 @@ static void update_player(const Input *in) {
 		if (p->t >= ATTACK_FRAMES) { p->state = P_IDLE; p->t = 0; }
 		break;
 	case P_DRINK:
-		if (p->t == DRINK_HEAL_AT) { p->hp = p->hp + FLASK_HEAL > HP_MAX ? HP_MAX : p->hp + FLASK_HEAL; }
+		if (p->t == DRINK_HEAL_AT) { p->hp = p->hp + FLASK_HEAL > HP_MAX ? HP_MAX : p->hp + FLASK_HEAL; emit(EV_HEAL, p->x, p->y); }
 		if (p->t >= DRINK_FRAMES) { p->state = P_IDLE; p->t = 0; }
 		break;
 	case P_STAGGER:
@@ -292,18 +322,23 @@ static void update_player(const Input *in) {
 	}
 
 	if (p->state == P_IDLE) {
-		/* The D-pad turns (no time). Remember the facing before, so holding
-		 * that direction and pressing Circle dodges that way without turning. */
-		if (pressed_dir >= 0 && pressed_dir != p->facing) {
+		/* Left / Right turn a quarter, Down turns around (no time). Remember
+		 * the facing before, so holding that direction and pressing Circle
+		 * dodges that way (relative to before) without turning. */
+		if (pressed_dir > 0) {
 			p->prev_facing = p->facing;
-			p->facing = pressed_dir;
+			p->facing = (p->facing + pressed_dir) & 3;
 			p->turned_dir = pressed_dir;
+			emit(EV_TURN, p->x, p->y);
 		}
 		p->blocking = (in->held & PAD_SQUARE) != 0;
 		if (p->buffered == BUF_DODGE) {
-			int dir = p->buffer_dir >= 0 ? p->buffer_dir : p->facing;
-			int facing = p->buffer_dir >= 0 && p->buffer_dir == p->turned_dir ? p->prev_facing : p->facing;
-			if (try_dodge(dir)) p->facing = facing;
+			int base = p->buffer_dir > 0 && p->buffer_dir == p->turned_dir ? p->prev_facing : p->facing;
+			int rel = p->buffer_dir > 0 ? p->buffer_dir : 0;
+			if (try_dodge((base + rel) & 3)) {
+				p->facing = base;
+				p->turned_dir = -1;
+			}
 			p->buffered = BUF_NONE;
 		} else if (p->buffered == BUF_ATTACK) {
 			try_attack();
@@ -332,6 +367,7 @@ static void update_player(const Input *in) {
 		drop_amount = 0;
 		drop_x = drop_y = -1;
 		say("ABSOLUTION RECOVERED", 90);
+		emit(EV_RECOVER, p->x, p->y);
 	}
 }
 
@@ -369,6 +405,7 @@ static void start_attack(Enemy *e, int kind) {
 	}
 	e->state = E_WINDUP;
 	e->t = 0;
+	emit(EV_WINDUP, e->x, e->y);
 }
 
 static void update_enemy(Enemy *e) {
@@ -421,6 +458,7 @@ static void update_enemy(Enemy *e) {
 				break;
 			}
 			shake_t = shake_t > 3 ? shake_t : 3;
+			emit(EV_SLAM, e->x, e->y);
 			e->state = E_RECOVER;
 			e->t = 0;
 		}
@@ -452,18 +490,29 @@ int game_telegraph(int x, int y) {
 /* ---- The frame ---------------------------------------------------------------- */
 
 void game_update(const Input *in) {
+	num_events = 0;
+	if (hitstop_t > 0) {
+		/* Frozen for a moment on a heavy hit: inputs wait. */
+		hitstop_t--;
+		held_pressed |= in->pressed;
+		return;
+	}
+	Input now = *in;
+	now.pressed |= held_pressed;
+	held_pressed = 0;
+	in = &now;
 	game_frames++;
-	state_t++;
+	floor_t++;
 	if (message_t > 0) message_t--;
 	if (shake_t > 0) shake_t--;
 
 	switch (floor_state) {
 	case F_WAVE_INTRO:
-		if (state_t == 1 && wave > 0) say(wave == 1 ? "WAVE II" : "WAVE III", 90);
-		if (state_t >= 90) {
+		if (floor_t == 1 && wave > 0) say(wave == 1 ? "WAVE II" : "WAVE III", 90);
+		if (floor_t >= 90) {
 			spawn_wave();
 			floor_state = F_FIGHT;
-			state_t = 0;
+			floor_t = 0;
 		}
 		break;
 	case F_FIGHT:
@@ -471,14 +520,14 @@ void game_update(const Input *in) {
 			int dying = 0;
 			for (int i = 0; i < MAX_ENEMIES; i++) dying |= enemies[i].state == E_DYING;
 			if (!dying) {
-				state_t = 0;
+				floor_t = 0;
 				if (++wave < NUM_WAVES) floor_state = F_WAVE_INTRO;
-				else { floor_state = F_CLEARED; say("THE FLOOR FALLS SILENT", 0); }
+				else { floor_state = F_CLEARED; say("THE FLOOR FALLS SILENT", 0); emit(EV_CLEAR, 0, 0); }
 			}
 		}
 		break;
 	case F_DEAD:
-		if (state_t > 90 && (in->pressed & PAD_CROSS)) {
+		if (floor_t > 90 && (in->pressed & PAD_CROSS)) {
 			/* Rise again: what you carried stays where you fell; what you
 			 * left last time is gone. */
 			int x = player.x, y = player.y, amount = absolution;
