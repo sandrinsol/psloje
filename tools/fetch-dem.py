@@ -13,7 +13,7 @@
 import io, json, sys
 import numpy as np, requests, tifffile
 
-BOX = (19.474, 40.418, 19.500, 40.475)   # minlon, minlat, maxlon, maxlat (= tools/fetch-vlora.sh)
+BOX = (19.450, 40.405, 19.525, 40.495)   # minlon, minlat, maxlon, maxlat (= tools/fetch-vlora.sh)
 MARGIN = 0.004                           # degrees, so filters and edges are clean
 out = sys.argv[1] if len(sys.argv) > 1 else 'data/vlora-dem.json'
 

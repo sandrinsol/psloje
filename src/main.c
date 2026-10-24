@@ -2,8 +2,8 @@
  * VLORA TAXI: drive a Mercedes W124 taxi through Vlora, Albania, built from
  * OpenStreetMap data (tools/osm2map.mjs) and streamed from the CD.
  *
- * Drive with R2 (gas), L2 (brake, reverse), the D-pad or left stick (steer)
- * and Square (handbrake). Pick up passengers and take them where they want
+ * Drive with R2 / Cross / Up (gas), L2 / Down (brake, reverse), the D-pad
+ * or left stick (steer) and Square (handbrake). Pick up passengers and take them where they want
  * to go (game.c). The day goes by at a minute a second.
  *
  * Variables the test harness reads by name (see ps1test.json):
@@ -138,8 +138,9 @@ int main(int argc, const char **argv) {
 		if (ticks > 4) ticks = 4;
 		read_pad();
 		CarInput in = { 0 };
-		in.gas = !!(held & PAD_R2);
-		in.brake = !!(held & PAD_L2);
+		/* Gas: R2, Cross or Up; brake / reverse: L2 or Down (easier on a keyboard). */
+		in.gas = !!(held & (PAD_R2 | PAD_CROSS | PAD_UP));
+		in.brake = !!(held & (PAD_L2 | PAD_DOWN));
 		in.handbrake = !!(held & PAD_SQUARE);
 		in.steer = (held & PAD_RIGHT ? 4096 : 0) - (held & PAD_LEFT ? 4096 : 0);
 		if (!in.steer && has_stick) { in.steer = stick_x; in.analog = 1; }
@@ -177,7 +178,10 @@ int main(int argc, const char **argv) {
 
 		DrawSync(0);
 		cpu_usage = (TIMER_VALUE(1) * 100) / 526;   /* 30 fps: 2 x 263 lines */
-		VSync(0);
+		/* A steady 30 fps: show a new frame every second VSync at most. */
+		static int last_flip;
+		do VSync(0); while (VSync(-1) - last_flip < 2);
+		last_flip = VSync(-1);
 		TIMER_VALUE(1) = 0;
 		PutDispEnv(&b->disp);
 		setRGB0(&b->draw, fog_colour.r, fog_colour.g, fog_colour.b);   /* sky = fog, by time of day */

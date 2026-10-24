@@ -6,17 +6,27 @@ Mercedes-Benz W124 taxi through the city's real streets, built from
 [PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK) and tested with the
 [ps1-test](https://github.com/sandrinsol/ps1-test) emulator harness and MCP server.
 
-**Status: driving, fares and day/night work in real Vlora**: Sheshi i
-Flamurit, the old town, the port and the Lungomare down to Uji i Ftohtë.
-Streets (232 km, with their names), 655 places, the coastline and the sea
-come from OpenStreetMap; 10,006 buildings from OpenStreetMap and Microsoft's
-footprints (via Overture Maps); the terrain (Kuzum Baba, the hills above the
-coast road) from the Copernicus DEM. See [data/README.md](data/README.md).
+**Status: driving, fares and day/night work in the whole of Vlora** (about
+6.4 x 10 km: the centre, Skela, the port, the Lungomare down to Uji i
+Ftohtë). Streets (482 km, with their names), 751 places, the coastline and
+the sea come from OpenStreetMap; 19,134 buildings from OpenStreetMap and
+Microsoft's footprints (via Overture Maps); the terrain (Kuzum Baba, the hills
+above the coast road) from the Copernicus DEM. You see about 170 m, at 30
+fps. See [data/README.md](data/README.md).
+
+**Polish in progress** (one step at a time, each merged when its tests pass):
+1. Whole city, more buildings, heights by neighbourhood, longer view. **Done.**
+2. Hand-drawn Vlora-style textures, shop fronts, dithering.
+3. Bright Mediterranean look: sky, sun, clouds, the bay's horizon.
+4. Pavements, kerbs, trees and palms, lamps, signs, parked cars, people.
+5. Landmarks: Independence Monument, Muradie Mosque, the flag square, the port.
+6. Detailed textured W124 and a Driver-style camera with more views.
+7. Night: lit windows, street lamps, better headlights, neon.
 
 | Button | Action |
 |---|---|
-| R2 | Accelerate |
-| L2 | Brake, then reverse |
+| R2, Cross or Up | Accelerate (keyboard: R, X or the Up arrow) |
+| L2 or Down | Brake, then reverse (keyboard: Tab or the Down arrow) |
 | D-pad left/right or left stick | Steer |
 | Square | Handbrake |
 
@@ -83,14 +93,24 @@ From the data the converter takes:
   buildings stand on their lowest corner; each tile carries an 8 m height grid
   the car drives on (it tilts on slopes and gravity pulls along them).
 - **Per-building culling and detail**: each building is a group with a bounding
-  sphere (skipped in one test when out of view) and two sets of faces,
-  textured panels up close and one quad per wall beyond 50 m.
+  sphere (skipped in one test when out of view), its own vertices (transformed
+  only when it is drawn), textured walls up close and one quad per wall beyond
+  50 m; its roof is skipped when the camera is below it.
+- **Far tiles**: each tile also has a far version (building boxes, 32 m ground)
+  streamed for the ring beyond the detailed 5 x 5 tiles, out to 7 x 7.
+- **Texture window**: walls and roads repeat their 64-pixel texture up to 4
+  times across one polygon (the GPU's texture window), so a wall needs a
+  quad per 32 m x 8 floors; near the camera, textured faces are split to
+  limit the PS1's affine texture warping.
+- **Heights** when OSM has none, by neighbourhood: big footprints within 150 m
+  of the sea are 9-13 storey towers, big ones on main roads 7-9 storey
+  blocks, small ones houses (see `guessLevels` in `tools/osm2map.mjs`).
 
-The build writes `build/map-report.json` (buildings, guessed heights, roads,
-street names, places, tile sizes). **Accuracy:** street layout, footprints,
-the coast, terrain and names come from real data; building heights are the
-exception (see [data/README.md](data/README.md)): 9,953 of 10,006 are guesses
-by building type. Not yet handled: inner courtyards of multipolygon buildings.
+The build writes `build/map-report.json` (buildings, guessed heights by rule,
+roads, street names, places, tile sizes). **Accuracy:** street layout,
+footprints, the coast, terrain and names come from real data; building heights
+are the exception (see [data/README.md](data/README.md)): 19,071 of 19,134 are
+guesses by neighbourhood. Not yet handled: inner courtyards of multipolygon buildings.
 
 Map data © OpenStreetMap contributors (ODbL), building footprints ©
 Microsoft via the Overture Maps Foundation (ODbL), terrain from the Copernicus
@@ -118,8 +138,8 @@ Generated files, committed so the build doesn't need to regenerate them:
 
 - `src/main.c`: main loop, pad input (60 Hz physics whatever the frame rate),
   HUD.
-- `src/world.c`: streams tiles from `MAP.BIN` (one CD read at a time, 5 × 5
-  tiles around the car), draws them with the GTE (textured near, fogged
+- `src/world.c`: streams tiles from `MAP.BIN` (one CD read at a time: 5 × 5
+  detailed tiles around the car, far versions out to 7 × 7), draws them with the GTE (textured near, fogged
   Gouraud far, faces crossing the near plane split until they fit), building
   collisions.
 - `src/car.c`: W124 physics (speed-dependent steering, grip, handbrake drift,

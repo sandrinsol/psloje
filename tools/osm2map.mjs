@@ -27,26 +27,32 @@
 // tile's vertices are relative to its south-west corner so they fit in 16 bits.
 //
 // MAP.BIN layout (little-endian, every tile starts on a 2048-byte sector):
-//   header  'VMAP' u16 version, u16 tilesX, u16 tilesZ, u16 tileUnits,
-//           u16 headerSectors, u16 maxTileSectors, i32 spawnX, i32 spawnZ,
+//   header  'VMAP' u16 version (3), u16 tilesX, u16 tilesZ, u16 tileUnits,
+//           u16 headerSectors, u16 0, i32 spawnX, i32 spawnZ,
 //           i16 spawnHeading (4096 = full turn, 0 = north, clockwise),
 //           u16 globalSectors, char name[32], u32 globalSector,
-//           then per tile: u32 sector, u16 sectors, u16 pad
+//           then per tile: u32 first sector << 10 | far sectors << 5 | near sectors
+//   per tile: a far blob (building boxes, 32 m ground) then a near blob
+//   (everything), each from a sector start, both in the tile layout below
 //   tile    u16 nverts, nfaces, nedges, nflat, i16 minX, minZ, maxX, maxZ,
 //           i16 minY (tallest point, negative), u16 flags (1 = height grid),
-//           u16 ngroups, u16 pad
+//           u16 ngroups, u16 nsegs, u16 nflatVerts, u16 pad
+//           (vertices: the flat faces' first, then each group's own range)
 //           verts  nverts x { i16 x, y, z, pad }
 //           faces  nfaces x { u16 v[4], u8 u0, v0, u1, v1, u8 tex|layer<<4,
 //                             u8 r, g, b }   (v[3] == 0xffff: triangle)
 //           edges  nedges x { i16 x0, z0, x1, z1 }
 //           height 9 x 9 i16: ground Y every 8 m (row = z), for the car
 //           groups ngroups x { i16 cx, cz, radius, topY, bottomY (units),
-//                              u16 first, nFine, nCoarse }: one per building,
+//                              u16 first, nFine, nCoarse, vFirst, vCount,
+//                              nRoof, pad }: one per building (its roof faces last),
 //                              its fine faces then its coarse ones (nCoarse 0:
 //                              use the fine ones), all after the flat faces
+//           segs   nsegs x { i16 x0, z0, x1, z1 (metres), u16 name, u8 class, u8 pad }:
+//                  drivable roads for the minimap and street names (near only)
 //   The first nflat faces lie on the ground (drawn first, by layer); the rest
 //   are depth-sorted.
-//   global  places, minimap road segments and names (see "Places" below)
+//   global  places and names (see "Places" below)
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -57,11 +63,17 @@ const SECTOR = 2048;
 const PANEL_W = 8;               // metres of wall per texture repeat
 const FLOOR_H = 3;               // metres per floor
 const PANEL_FLOORS = 2;          // floors per texture repeat
-const GROUND_CELL = 16;          // metres per ground quad
-const ROAD_PIECE = 8;            // metres per road quad
+const GROUND_CELL = 32;          // metres per ground quad (split finer at the coast and near the camera)
+const ROAD_PIECE = 32;           // metres per road quad (the texture repeats every 8 m)
+const ROAD_REPEAT = 8;           // metres of road per texture repeat
+// Walls and roads use the GPU's texture window: a 64-pixel texture repeats up
+// to 4 times across one polygon (u/v 0..255), so a wall quad covers up to
+// 4 x 8 m wide and 4 x 2 floors tall.
+const MAX_REPEAT = 4;
 const EDGE_PIECE = 32;           // metres per collision edge
 const MAX_TILE_VERTS = 2400;     // must match MAX_TILE_VERTS in src/world.h
-const MAX_TILE_BYTES = 48 * 1024; // must match TILE_SLOT_BYTES in src/world.h
+const MAX_TILE_BYTES = 20 * 1024; // must match TILE_SLOT_BYTES in src/world.h
+const MAX_FAR_BYTES = 6 * 1024;   // must match FAR_SLOT_BYTES in src/world.h
 
 // Texture ids: must match the order in tools/maketex.mjs.
 const TEX = { asphalt: 0, paving: 1, wallA: 2, wallB: 3, wallC: 4, ground: 5, grass: 6, sand: 7, none: 15 };
@@ -149,18 +161,24 @@ function elev(x, z) {
 
 // ---- Geometry collection, per tile ----------------------------------------
 
-const tiles = Array.from({ length: tilesX * tilesZ }, (_, i) => ({ tx: i % tilesX, tz: Math.floor(i / tilesX), verts: [], vmap: new Map(), flat: [], solid: [], groups: [], edges: [] }));
+const newTile = (i) => ({ tx: i % tilesX, tz: Math.floor(i / tilesX), verts: [], vmap: new Map(), flat: [], solid: [], groups: [], edges: [], segs: [] });
+const tiles = Array.from({ length: tilesX * tilesZ }, (_, i) => newTile(i));
+// The far version of each tile: building boxes and coarse ground only, for the
+// ring of tiles beyond the detailed ones (the view reaches ~200 m).
+const farTiles = Array.from({ length: tilesX * tilesZ }, (_, i) => newTile(i));
 const tileAt = (x, z) => {
   const tx = Math.min(tilesX - 1, Math.max(0, Math.floor(x / TILE_M)));
   const tz = Math.min(tilesZ - 1, Math.max(0, Math.floor(z / TILE_M)));
   return tiles[tz * tilesX + tx];
 };
+const farTileAt = (x, z) => farTiles[tileAt(x, z).tz * tilesX + tileAt(x, z).tx];
 // Vertex in tile-local units; shared when identical.
+let vertScope = '';   // set while making a building: its vertices aren't shared
 const vert = (t, x, y, z) => {
   if (![x, y, z].every(Number.isFinite)) throw new Error(`bad vertex ${x}, ${y}, ${z}`);
   const lx = Math.round((x - t.tx * TILE_M) * UNIT), ly = Math.round(-y * UNIT), lz = Math.round((z - t.tz * TILE_M) * UNIT);
   if (Math.abs(lx) > 32000 || Math.abs(lz) > 32000 || Math.abs(ly) > 32000) throw new Error('vertex out of 16-bit range');
-  const key = `${lx},${ly},${lz}`;
+  const key = `${vertScope}${lx},${ly},${lz}`;
   let i = t.vmap.get(key);
   if (i === undefined) { i = t.verts.length; t.verts.push([lx, ly, lz]); t.vmap.set(key, i); }
   return i;
@@ -214,8 +232,34 @@ const parseColour = (s) => {
 const metres = (s) => { if (!s) return NaN; const m = String(s).match(/^\s*([\d.]+)\s*(m|ft)?/); return m ? +m[1] * (m[2] === 'ft' ? 0.3048 : 1) : NaN; };
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
 
-// Default floors when OSM has no height: a guess by building type.
-const DEFAULT_LEVELS = { house: 2, detached: 2, semidetached_house: 2, terrace: 2, garage: 1, garages: 1, shed: 1, roof: 1, kiosk: 1, hut: 1, service: 1, church: 3, mosque: 3, retail: 2, commercial: 4, apartments: 5, residential: 5, office: 5, hotel: 6, school: 3, hospital: 4, university: 4, public: 3, civic: 3, industrial: 2, warehouse: 2, yes: 4 };
+
+
+// Floors for a building OSM gives no height: a guess from what Vlora looks
+// like. Houses and sheds by type; otherwise by footprint and place: big
+// footprints on the seafront are the Lungomare's hotel and apartment towers,
+// big ones on main roads the boulevards' 7-9 storey blocks, small ones houses.
+// A hash of the id varies it by a floor or so, the same on every build.
+const SMALL = new Set(['garage', 'garages', 'shed', 'roof', 'kiosk', 'hut', 'service', 'carport', 'toilets']);
+const HOUSE = new Set(['house', 'detached', 'semidetached_house', 'terrace', 'bungalow', 'farm']);
+const levelStats = {};
+function guessLevels(tags, poly, id) {
+  const type = tags.building || tags['building:part'] || 'yes';
+  const area = Math.abs(area2(poly));
+  const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length, cz = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+  const r = hash(id + 'h') % 3;   // 0, 1, 2
+  let kind, levels;
+  if (SMALL.has(type) || area < 35) { kind = 'small'; levels = 1; }
+  else if (HOUSE.has(type) || area < 90) { kind = 'house'; levels = 1 + (r > 0); }
+  else if (['industrial', 'warehouse', 'hangar'].includes(type)) { kind = 'industrial'; levels = 2; }
+  else if (['mosque', 'church', 'chapel'].includes(type)) { kind = 'religious'; levels = 3; }
+  else if (area < 180) { kind = 'small block'; levels = 2 + r; }
+  else if (area > 250 && coastAt(cx, cz).d < 150) { kind = 'seafront tower'; levels = 9 + r + (area > 700) * 2; }
+  else if (area > 250 && mainRoadDist(cx, cz) < 35) { kind = 'boulevard block'; levels = 7 + r; }
+  else if (area > 700) { kind = 'large block'; levels = 6 + r; }
+  else { kind = 'block'; levels = 4 + r; }
+  levelStats[kind] = (levelStats[kind] || 0) + 1;
+  return levels;
+}
 
 function building(poly, tags, id, isPart) {
   if (poly.length < 3) return;
@@ -224,7 +268,7 @@ function building(poly, tags, id, isPart) {
   const levels = parseFloat(tags['building:levels']);
   if (!(h > 0)) {
     if (levels > 0) h = levels * FLOOR_H + 1;
-    else { h = (DEFAULT_LEVELS[tags.building || tags['building:part']] ?? 4) * FLOOR_H + 1; stats.defaultHeights++; }
+    else { h = guessLevels(tags, poly, id) * FLOOR_H + 1; stats.defaultHeights++; }
   }
   let minH = metres(tags.min_height);
   if (!(minH >= 0)) minH = (parseFloat(tags['building:min_level']) || 0) * FLOOR_H;
@@ -243,12 +287,19 @@ function building(poly, tags, id, isPart) {
   // Each building is a group the game culls in one test (bounding sphere),
   // with fine faces (8 m x 2-floor textured panels) for up close and coarse
   // ones (one quad per wall) for far away.
+  vertScope = `b${id}:`;
   const group = { fine: [], coarse: [], cx, cz, r: Math.max(...poly.map(([x, z]) => Math.hypot(x - cx, z - cz))), top: ground + h, bottom: ground + minH };
   t.groups.push(group);
+  // Far: the same boxes in the far tile (tiny sheds left out).
+  const ft = farTileAt(cx, cz);
+  const far = Math.abs(area2(poly)) >= 35 ? { ...group, fine: [], coarse: null } : null;
+  if (far) { far.coarse = far.fine; ft.groups.push(far); }
 
   // Walls: outward faces of a counter-clockwise outline, vertex order TL, TR, BL, BR
   // seen from outside.
-  const rows = Math.max(1, Math.round((h - minH) / (FLOOR_H * PANEL_FLOORS)));
+  // Wall pieces: as few as the texture window allows (see MAX_REPEAT).
+  const repeatH = FLOOR_H * PANEL_FLOORS;
+  const rows = Math.max(1, Math.ceil((h - minH) / (repeatH * MAX_REPEAT) - 0.05));
   for (let i = 0; i < poly.length; i++) {
     const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % poly.length];
     const len = Math.hypot(x1 - x0, z1 - z0);
@@ -258,18 +309,19 @@ function building(poly, tags, id, isPart) {
     const light = 0.72 + 0.28 * Math.max(-1, Math.min(1, -nx * 0.6 - nz * 0.8));
     const base = wallCol ? wallCol.map((c) => c / 255 * 160) : [128, 128, 128];
     const rgb = base.map((c) => clampByte(c * light));
-    const cols = Math.max(1, Math.round(len / PANEL_W));
+    const cols = Math.max(1, Math.ceil(len / (PANEL_W * MAX_REPEAT) - 0.05));
     group.coarse.push({ v: [vert(t, x0, ground + h, z0), vert(t, x1, ground + h, z1), vert(t, x0, ground + minH, z0), vert(t, x1, ground + minH, z1)], uv: [0, 0, 63, 63], tex: wallTex, layer: 0, rgb });
+    if (far) far.fine.push({ v: [vert(ft, x0, ground + h, z0), vert(ft, x1, ground + h, z1), vert(ft, x0, ground + minH, z0), vert(ft, x1, ground + minH, z1)], uv: [0, 0, 63, 63], tex: wallTex, layer: 0, rgb });
     for (let c = 0; c < cols; c++) {
       const a = c / cols, bb = (c + 1) / cols;
       const ax = x0 + (x1 - x0) * a, az = z0 + (z1 - z0) * a, bx = x0 + (x1 - x0) * bb, bz = z0 + (z1 - z0) * bb;
-      const uSpan = Math.min(63, Math.round(len / cols / PANEL_W * 63));
+      const uSpan = Math.max(1, Math.min(255, Math.round(len / cols / PANEL_W * 64) - 1));
       for (let r = 0; r < rows; r++) {
         const y0 = minH + (h - minH) * r / rows, y1 = minH + (h - minH) * (r + 1) / rows;
-        const vSpan = Math.min(63, Math.round((y1 - y0) / (FLOOR_H * PANEL_FLOORS) * 63));
+        const vSpan = Math.max(1, Math.min(255, Math.round((y1 - y0) / repeatH * 64) - 1));
         // Seen from outside (to the right of a counter-clockwise outline), the
         // a end is on the left: TL, TR, BL, BR = a top, b top, a bottom, b bottom.
-        group.fine.push({ v: [vert(t, ax, ground + y1, az), vert(t, bx, ground + y1, bz), vert(t, ax, ground + y0, az), vert(t, bx, ground + y0, bz)], uv: [0, 63 - vSpan, uSpan, 63], tex: wallTex, layer: 0, rgb });
+        group.fine.push({ v: [vert(t, ax, ground + y1, az), vert(t, bx, ground + y1, bz), vert(t, ax, ground + y0, az), vert(t, bx, ground + y0, bz)], uv: [0, 255 - vSpan, uSpan, 255], tex: wallTex, layer: 0, rgb });   // bottom of the texture at street level
       }
     }
     // Collision only for walls that reach the street.
@@ -284,14 +336,18 @@ function building(poly, tags, id, isPart) {
   }
   // Roof (seen from above: clockwise on screen = counter-clockwise in X/Z).
   for (const [a, bb, c] of triangulate(poly)) {
+    group.nroof = (group.nroof || 0) + 1;
+    if (far) far.nroof = (far.nroof || 0) + 1;
     const roof = { v: [vert(t, poly[a][0], ground + h, poly[a][1]), vert(t, poly[c][0], ground + h, poly[c][1]), vert(t, poly[bb][0], ground + h, poly[bb][1]), 0xffff], uv: [0, 0, 0, 0], tex: TEX.none, layer: 0, rgb: roofCol };
     group.fine.push(roof);
     group.coarse.push(roof);
+    if (far) far.fine.push({ ...roof, v: [vert(ft, poly[a][0], ground + h, poly[a][1]), vert(ft, poly[c][0], ground + h, poly[c][1]), vert(ft, poly[bb][0], ground + h, poly[bb][1]), 0xffff] });
   }
 }
 
 // Flat polygon on the ground (park, water…), untextured.
 function flatArea(poly, layer, rgb) {
+  vertScope = '';
   if (poly.length < 3) return;
   if (area2(poly) < 0) poly = poly.slice().reverse();
   stats.areas++;
@@ -307,6 +363,7 @@ const ROAD_WIDTH = { motorway: 14, trunk: 12, primary: 10, secondary: 9, tertiar
 const FOOT = new Set(['pedestrian', 'footway', 'path', 'steps', 'cycleway']);
 
 function road(pts, tags) {
+  vertScope = '';
   const kind = tags.highway.replace(/_link$/, '');
   let w = metres(tags.width);
   if (!(w > 0)) w = parseFloat(tags.lanes) > 0 ? parseFloat(tags.lanes) * 3.2 : ROAD_WIDTH[kind];
@@ -328,16 +385,23 @@ function road(pts, tags) {
       const ax = x0 + (x1 - x0) * a, az = z0 + (z1 - z0) * a, bx = x0 + (x1 - x0) * bb, bz = z0 + (z1 - z0) * bb;
       if (!inside((ax + bx) / 2, (az + bz) / 2)) continue;
       const t = tileAt((ax + bx) / 2, (az + bz) / 2);
-      const vSpan = Math.min(63, Math.round(len / n / ROAD_PIECE * 63));
+      const vSpan = Math.max(1, Math.min(255, Math.round(len / n / ROAD_REPEAT * 64) - 1));
       // Seen from above, travelling along the road: far-left, far-right, near-left, near-right.
       addFace(t, true, { v: [groundVert(t, bx + px, bz + pz), groundVert(t, bx - px, bz - pz), groundVert(t, ax + px, az + pz), groundVert(t, ax - px, az - pz)], uv: [0, 0, 63, vSpan], tex, layer, rgb: [128, 128, 128] });
     }
   }
-  // Joints: an octagon at every inner node fills the gap where segments turn.
-  for (let i = 1; i + 1 < pts.length; i++) joint(pts[i], half, layer, tex);
+  // Joints: an octagon fills the gap where a road turns (not on straight runs,
+  // nor on narrow footways where the gap doesn't show).
+  if (!foot || half >= 2)
+    for (let i = 1; i + 1 < pts.length; i++) {
+      const [ax, az] = pts[i - 1], [bx, bz] = pts[i], [cx, cz] = pts[i + 1];
+      const turn = Math.abs(Math.atan2(cx - bx, cz - bz) - Math.atan2(bx - ax, bz - az));
+      if (Math.min(turn, 2 * Math.PI - turn) > 0.2) joint(pts[i], half, layer, tex);
+    }
 }
 
 function joint([x, z], r, layer, tex) {
+  vertScope = '';
   if (!inside(x, z)) return;
   const t = tileAt(x, z);
   const p = Array.from({ length: 8 }, (_, k) => [x + r * Math.cos(k * Math.PI / 4), z + r * Math.sin(k * Math.PI / 4)]);
@@ -366,23 +430,6 @@ const areaKind = (t) =>
   : t.amenity === 'parking' ? 'parking'
   : t.place === 'square' || (t.highway === 'pedestrian' && t.area === 'yes') ? 'square'
   : null;
-
-for (const w of ways.values()) {
-  const t = w.tags;
-  if (t.building && t.building !== 'no' && closed(w)) building(ring(w), t, w.id, false);
-  else if (t['building:part'] && t['building:part'] !== 'no' && closed(w)) building(ring(w), t, w.id, true);
-  else if (closed(w) && areaKind(t)) flatArea(ring(w), LAYER.area, AREA_COLOURS[areaKind(t)]);
-  else if (t.highway && t.area !== 'yes') road(wayPts(w), t);
-}
-// Multipolygon buildings and areas: each outer ring on its own (inner rings ignored).
-for (const r of relations) {
-  if (r.tags.type !== 'multipolygon') continue;
-  const outers = r.members.filter((m) => m.type === 'way' && m.role === 'outer').map((m) => ways.get(m.ref)).filter((w) => w && closed(w));
-  for (const w of outers) {
-    if (r.tags.building) building(ring(w), { ...r.tags, ...w.tags }, w.id, false);
-    else if (areaKind(r.tags)) flatArea(ring(w), LAYER.area, AREA_COLOURS[areaKind(r.tags)]);
-  }
-}
 
 // Coastline (natural=coastline): OSM draws it with the land on the left. Split
 // into <= 32 m pieces, bucketed in 64 m cells for the land/sea test, and used
@@ -438,10 +485,57 @@ function coastAt(x, z) {
   return best ? { d: best.d, sea: best.cross < 0 } : { d: Infinity, sea: false };
 }
 
+// Main roads (trunk to tertiary), bucketed in 64 m cells: buildings fronting
+// them are taller (see guessLevels).
+const mainGrid = new Map();
+for (const w of ways.values()) {
+  const k = (w.tags.highway || '').replace(/_link$/, '');
+  if (!['trunk', 'primary', 'secondary', 'tertiary'].includes(k)) continue;
+  const pts = wayPts(w);
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
+    for (let cz = Math.floor(Math.min(z0, z1) / 64); cz <= Math.floor(Math.max(z0, z1) / 64); cz++)
+      for (let cx = Math.floor(Math.min(x0, x1) / 64); cx <= Math.floor(Math.max(x0, x1) / 64); cx++) {
+        const key = cx + ',' + cz;
+        if (!mainGrid.has(key)) mainGrid.set(key, []);
+        mainGrid.get(key).push([x0, z0, x1, z1]);
+      }
+  }
+}
+function mainRoadDist(x, z) {
+  let best = Infinity;
+  for (let cz = Math.floor(z / 64) - 1; cz <= Math.floor(z / 64) + 1; cz++)
+    for (let cx = Math.floor(x / 64) - 1; cx <= Math.floor(x / 64) + 1; cx++)
+      for (const [x0, z0, x1, z1] of mainGrid.get(cx + ',' + cz) || []) {
+        const dx = x1 - x0, dz = z1 - z0, l2 = dx * dx + dz * dz || 1e-9;
+        const u = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / l2));
+        best = Math.min(best, Math.hypot(x0 + dx * u - x, z0 + dz * u - z));
+      }
+  return best;
+}
+
+for (const w of ways.values()) {
+  const t = w.tags;
+  if (t.building && t.building !== 'no' && closed(w)) building(ring(w), t, w.id, false);
+  else if (t['building:part'] && t['building:part'] !== 'no' && closed(w)) building(ring(w), t, w.id, true);
+  else if (closed(w) && areaKind(t)) flatArea(ring(w), LAYER.area, AREA_COLOURS[areaKind(t)]);
+  else if (t.highway && t.area !== 'yes') road(wayPts(w), t);
+}
+// Multipolygon buildings and areas: each outer ring on its own (inner rings ignored).
+for (const r of relations) {
+  if (r.tags.type !== 'multipolygon') continue;
+  const outers = r.members.filter((m) => m.type === 'way' && m.role === 'outer').map((m) => ways.get(m.ref)).filter((w) => w && closed(w));
+  for (const w of outers) {
+    if (r.tags.building) building(ring(w), { ...r.tags, ...w.tags }, w.id, false);
+    else if (areaKind(r.tags)) flatArea(ring(w), LAYER.area, AREA_COLOURS[areaKind(r.tags)]);
+  }
+}
+
 // Ground: a grid of quads under everything: textured land, flat-coloured sea.
 // Cells near the coast are classified in 4 m strips so the shore follows it.
 const SEA = [46, 88, 128];
 function groundQuad(t, x0, z0, w, h, sea) {
+  vertScope = '';
   addFace(t, true, {
     v: sea ? [vert(t, x0, 0, z0 + h), vert(t, x0 + w, 0, z0 + h), vert(t, x0, 0, z0), vert(t, x0 + w, 0, z0)]
            : [groundVert(t, x0, z0 + h), groundVert(t, x0 + w, z0 + h), groundVert(t, x0, z0), groundVert(t, x0 + w, z0)],
@@ -468,6 +562,16 @@ for (const t of tiles) {
   }
 }
 stats.seaCells = seaCells;
+vertScope = '';
+for (const ft of farTiles) {
+  for (let gz = 0; gz < TILE_M; gz += 32) for (let gx = 0; gx < TILE_M; gx += 32) {
+    const x0 = ft.tx * TILE_M + gx, z0 = ft.tz * TILE_M + gz;
+    const sea = coastAt(x0 + 16, z0 + 16).sea;
+    const v = sea ? [vert(ft, x0, 0, z0 + 32), vert(ft, x0 + 32, 0, z0 + 32), vert(ft, x0, 0, z0), vert(ft, x0 + 32, 0, z0)]
+                  : [groundVert(ft, x0, z0 + 32), groundVert(ft, x0 + 32, z0 + 32), groundVert(ft, x0, z0), groundVert(ft, x0 + 32, z0)];
+    ft.flat.push({ v, uv: [0, 0, 0, 0], tex: sea ? TEX.none : TEX.ground, layer: LAYER.ground, rgb: sea ? SEA : [128, 128, 128] });
+  }
+}
 
 // ---- Spawn point -------------------------------------------------------------
 
@@ -551,64 +655,76 @@ for (const { a: [x0, z0], b: [x1, z1], name, kind } of drivable) {
   const cls = ['motorway', 'trunk', 'primary'].includes(kind) ? 2 : ['secondary', 'tertiary'].includes(kind) ? 1 : 0;
   for (let k = 0; k < n; k++) {
     const ax = x0 + (x1 - x0) * k / n, az = z0 + (z1 - z0) * k / n, bx = x0 + (x1 - x0) * (k + 1) / n, bz = z0 + (z1 - z0) * (k + 1) / n;
-    segs.push({ c: [ax, az, bx, bz].map(Math.round), name: name ? nameId(name) : 0xffff, cls, tile: tileAt((ax + bx) / 2, (az + bz) / 2) });
+    const sg = { c: [ax, az, bx, bz].map(Math.round), name: name ? nameId(name) : 0xffff, cls };
+    segs.push(sg);
+    tileAt((ax + bx) / 2, (az + bz) / 2).segs.push(sg);
   }
 }
-segs.sort((a, b) => (a.tile.tz * tilesX + a.tile.tx) - (b.tile.tz * tilesX + b.tile.tx));
-if (places.length > 4000 || segs.length > 20000 || names.length > 4000) throw new Error('too many places, road segments or names');
+if (places.length > 4000 || names.length > 8000) throw new Error('too many places or names');
 
 function globalBlob() {
   const text = names.map((n) => Buffer.from(n + '\0', 'latin1'));
-  const textBytes = text.reduce((s, b) => s + b.length, 0);
-  const size = 8 + places.length * 12 + tiles.length * 4 + segs.length * 12 + names.length * 2 + textBytes;
+  const textBytes = text.reduce((sum, b) => sum + b.length, 0);
+  const size = 8 + places.length * 12 + names.length * 2 + textBytes;
   const buf = Buffer.alloc((size + 3) & ~3);
   let o = 0;
-  for (const v of [places.length, segs.length, names.length, tiles.length]) { buf.writeUInt16LE(v, o); o += 2; }
+  for (const v of [places.length, names.length, 0, 0]) { buf.writeUInt16LE(v, o); o += 2; }
   for (const p of places) { buf.writeInt32LE(p.x, o); buf.writeInt32LE(p.z, o + 4); buf.writeUInt16LE(p.name, o + 8); buf.writeUInt8(p.kind, o + 10); o += 12; }
-  const first = new Array(tiles.length).fill(0), count = new Array(tiles.length).fill(0);
-  segs.forEach((sg, i) => { const t = sg.tile.tz * tilesX + sg.tile.tx; if (!count[t]) first[t] = i; count[t]++; });
-  for (let t = 0; t < tiles.length; t++) { buf.writeUInt16LE(first[t], o); buf.writeUInt16LE(count[t], o + 2); o += 4; }
-  for (const sg of segs) { sg.c.forEach((v, k) => buf.writeInt16LE(v, o + k * 2)); buf.writeUInt16LE(sg.name, o + 8); buf.writeUInt8(sg.cls, o + 10); o += 12; }
   let off = 0;
   for (const b of text) { buf.writeUInt16LE(off, o); o += 2; off += b.length; }
   for (const b of text) { b.copy(buf, o); o += b.length; }
   return buf;
 }
 const global = globalBlob();
-const MAX_GLOBAL_BYTES = 160 * 1024;  // must match GLOBAL_BYTES in src/world.c
+const MAX_GLOBAL_BYTES = 64 * 1024;  // must match GLOBAL_BYTES in src/world.c
 if (global.length > MAX_GLOBAL_BYTES) throw new Error(`places/roads/names take ${global.length} bytes (max ${MAX_GLOBAL_BYTES})`);
 
 // ---- Write ----------------------------------------------------------------------
 
-const tileBlobs = [];
-let maxVerts = 0, maxBytes = 0, worst = null;
-for (const t of tiles) {
+// One tile (near or far) as bytes; see the layout at the top of the file.
+let maxVerts = 0, maxBytes = 0, worst = null, maxFar = 0;
+function encodeTile(t, near) {
   const flat = t.flat.sort((a, b) => a.layer - b.layer);
   if (t.solid.length) t.groups.push({ fine: t.solid, coarse: t.solid, cx: (t.tx + 0.5) * TILE_M, cz: (t.tz + 0.5) * TILE_M, r: TILE_M, top: 100, bottom: 0 });
   const faces = [...flat];
+  // New vertex order: the flat faces' vertices, then each group's in turn.
+  const order = [], newIndex = new Map();
+  const take = (fs) => { for (const f of fs) for (const v of f.v) if (v !== 0xffff && v !== undefined && !newIndex.has(v)) { newIndex.set(v, order.length); order.push(v); } };
+  take(flat);
+  const nflatVerts = order.length;
   const groupRecs = t.groups.map((g) => {
     const first = faces.length;
-    faces.push(...g.fine, ...(g.coarse === g.fine ? [] : g.coarse));
+    const shared = g.coarse === g.fine;
+    faces.push(...g.fine, ...(shared ? [] : g.coarse));
+    const vfirst = order.length;
+    take(g.fine);
+    if (!shared) take(g.coarse);
     return [Math.round((g.cx - t.tx * TILE_M) * UNIT), Math.round((g.cz - t.tz * TILE_M) * UNIT), Math.ceil(g.r * UNIT) + 1,
-      Math.round(-g.top * UNIT), Math.round(-g.bottom * UNIT), first, g.fine.length, g.coarse === g.fine ? g.fine.length : g.coarse.length, g.coarse === g.fine ? 1 : 0];
+      Math.round(-g.top * UNIT), Math.round(-g.bottom * UNIT), first, g.fine.length, shared ? 0 : g.coarse.length, vfirst, order.length - vfirst, g.nroof || 0];
   });
+  if (order.length !== t.verts.length) throw new Error(`tile ${t.tx},${t.tz}: ${t.verts.length - order.length} vertices shared between groups`);
+  const verts = order.map((i) => t.verts[i]);
+  const remap = (v) => (v === 0xffff || v === undefined ? 0xffff : newIndex.get(v));
   if (faces.length > 65535) throw new Error(`tile ${t.tx},${t.tz} has too many faces`);
   if (t.verts.length > MAX_TILE_VERTS) throw new Error(`tile ${t.tx},${t.tz} has ${t.verts.length} vertices (max ${MAX_TILE_VERTS}): lower the detail`);
-  // Ground height every 8 m (9 x 9 over the tile, in units, Y down) for the car.
+  // Near tiles: ground height every 8 m (9 x 9, units, Y down) for the car.
   const hm = [];
-  for (let j = 0; j <= 8; j++) for (let i = 0; i <= 8; i++) hm.push(Math.round(-elev(t.tx * TILE_M + i * 8, t.tz * TILE_M + j * 8) * UNIT));
-  const size = 24 + t.verts.length * 8 + faces.length * 16 + t.edges.length * 8 + hm.length * 2 + groupRecs.length * 16;
-  if (size > MAX_TILE_BYTES) throw new Error(`tile ${t.tx},${t.tz} is ${size} bytes (max ${MAX_TILE_BYTES}): lower the detail`);
+  if (near) for (let j = 0; j <= 8; j++) for (let i = 0; i <= 8; i++) hm.push(Math.round(-elev(t.tx * TILE_M + i * 8, t.tz * TILE_M + j * 8) * UNIT));
+  const segs = near ? t.segs : [];
+  const size = 28 + t.verts.length * 8 + faces.length * 16 + t.edges.length * 8 + hm.length * 2 + groupRecs.length * 24 + segs.length * 12;
+  const limit = near ? MAX_TILE_BYTES : MAX_FAR_BYTES;
+  if (size > limit) throw new Error(`${near ? '' : 'far '}tile ${t.tx},${t.tz} is ${size} bytes (max ${limit}): lower the detail`);
   const buf = Buffer.alloc(size);
   let minX = 32767, minZ = 32767, maxX = -32768, maxZ = -32768, minY = 0;
   for (const [x, y, z] of t.verts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); minY = Math.min(minY, y); }
+  if (!t.verts.length) minX = minZ = maxX = maxZ = 0;
   let o = 0;
   for (const v of [t.verts.length, faces.length, t.edges.length, flat.length]) { buf.writeUInt16LE(v, o); o += 2; }
-  for (const v of [minX, minZ, maxX, maxZ, minY, 1]) { buf.writeInt16LE(v, o); o += 2; }   // 1: has a height grid
-  buf.writeUInt16LE(groupRecs.length, o); o += 4;
-  for (const [x, y, z] of t.verts) { buf.writeInt16LE(x, o); buf.writeInt16LE(y, o + 2); buf.writeInt16LE(z, o + 4); o += 8; }
+  for (const v of [minX, minZ, maxX, maxZ, minY, near ? 1 : 0]) { buf.writeInt16LE(v, o); o += 2; }   // flags 1: has a height grid
+  buf.writeUInt16LE(groupRecs.length, o); buf.writeUInt16LE(segs.length, o + 2); buf.writeUInt16LE(nflatVerts, o + 4); o += 8;
+  for (const [x, y, z] of verts) { buf.writeInt16LE(x, o); buf.writeInt16LE(y, o + 2); buf.writeInt16LE(z, o + 4); o += 8; }
   for (const f of faces) {
-    for (let k = 0; k < 4; k++) buf.writeUInt16LE(f.v[k] ?? 0xffff, o + k * 2);
+    for (let k = 0; k < 4; k++) buf.writeUInt16LE(remap(f.v[k]), o + k * 2);
     f.uv.forEach((u, k) => buf.writeUInt8(u, o + 8 + k));
     buf.writeUInt8(f.tex | (f.layer << 4), o + 12);
     f.rgb.forEach((c, k) => buf.writeUInt8(clampByte(c), o + 13 + k));
@@ -616,43 +732,56 @@ for (const t of tiles) {
   }
   for (const e of t.edges) { e.forEach((v, k) => buf.writeInt16LE(v, o + k * 2)); o += 8; }
   for (const v of hm) { buf.writeInt16LE(v, o); o += 2; }
-  for (const [gx, gz, r, top, bottom, first, nfine, ncoarse, shared] of groupRecs) {
+  for (const [gx, gz, r, top, bottom, first, nfine, ncoarse, vfirst, vcount, nroof] of groupRecs) {
     for (const v of [gx, gz, r, top, bottom]) { buf.writeInt16LE(v, o); o += 2; }
-    // Coarse faces follow the fine ones; 0 = use the fine ones.
-    buf.writeUInt16LE(first, o); buf.writeUInt16LE(nfine, o + 2); buf.writeUInt16LE(shared ? 0 : ncoarse, o + 4);
-    o += 6;
+    buf.writeUInt16LE(first, o); buf.writeUInt16LE(nfine, o + 2); buf.writeUInt16LE(ncoarse, o + 4);   // ncoarse 0: use the fine ones
+    buf.writeUInt16LE(vfirst, o + 6); buf.writeUInt16LE(vcount, o + 8);
+    buf.writeUInt16LE(nroof, o + 10);   // the last nroof faces of fine and of coarse are the roof
+    o += 14;
   }
-  tileBlobs.push(buf);
-  maxVerts = Math.max(maxVerts, t.verts.length);
-  if (size > maxBytes) { maxBytes = size; worst = `${t.tx},${t.tz}`; }
+  for (const sg of segs) { sg.c.forEach((v, k) => buf.writeInt16LE(v, o + k * 2)); buf.writeUInt16LE(sg.name, o + 8); buf.writeUInt8(sg.cls, o + 10); o += 12; }
+  if (near) {
+    maxVerts = Math.max(maxVerts, t.verts.length);
+    if (size > maxBytes) { maxBytes = size; worst = `${t.tx},${t.tz}`; }
+  } else maxFar = Math.max(maxFar, size);
+  return buf;
 }
 
+// Each tile on the disc: its far blob, then its near blob, both from a sector
+// start. Index entry (u32): first sector << 10 | far sectors << 5 | near sectors.
 const nTiles = tiles.length;
-const headerBytes = 64 + nTiles * 8;
+const headerBytes = 64 + nTiles * 4;
 const headerSectors = Math.ceil(headerBytes / SECTOR);
 const header = Buffer.alloc(headerSectors * SECTOR);
-header.write('VMAP', 0, 'ascii');
-let sector = headerSectors, maxSectors = 0;
-const index = tileBlobs.map((blob) => { const n = Math.ceil(blob.length / SECTOR); const e = [sector, n]; sector += n; maxSectors = Math.max(maxSectors, n); return e; });
+const parts = [];
+let sector = headerSectors;
+for (let i = 0; i < nTiles; i++) {
+  const far = encodeTile(farTiles[i], false), near = encodeTile(tiles[i], true);
+  const fs = Math.ceil(far.length / SECTOR), ns = Math.ceil(near.length / SECTOR);
+  if (fs > 31 || ns > 31 || sector >= 1 << 22) throw new Error('tile too big for the index');
+  header.writeUInt32LE(((sector << 10) | (fs << 5) | ns) >>> 0, 64 + i * 4);
+  parts.push([sector, far], [sector + fs, near]);
+  sector += fs + ns;
+}
 const globalSector = sector, globalSectors = Math.ceil(global.length / SECTOR);
 sector += globalSectors;
-header.writeUInt16LE(2, 4);
+header.write('VMAP', 0, 'ascii');
+header.writeUInt16LE(3, 4);
 header.writeUInt16LE(tilesX, 6);
 header.writeUInt16LE(tilesZ, 8);
 header.writeUInt16LE(TILE, 10);
 header.writeUInt16LE(headerSectors, 12);
-header.writeUInt16LE(maxSectors, 14);
+header.writeUInt16LE(0, 14);
 header.writeInt32LE(Math.round(spawn[0] * UNIT), 16);
 header.writeInt32LE(Math.round(spawn[1] * UNIT), 20);
 header.writeInt16LE(Math.round(((spawn.heading ?? 0) / (2 * Math.PI)) * 4096) & 4095, 24);
 header.writeUInt16LE(globalSectors, 26);
 header.write(mapLabel.toUpperCase().slice(0, 31), 28, 'latin1');
 header.writeUInt32LE(globalSector, 60);
-index.forEach(([s, n], i) => { header.writeUInt32LE(s, 64 + i * 8); header.writeUInt16LE(n, 68 + i * 8); });
 
 const out = Buffer.alloc(sector * SECTOR);
 header.copy(out, 0);
-tileBlobs.forEach((blob, i) => blob.copy(out, index[i][0] * SECTOR));
+for (const [sec, blob] of parts) blob.copy(out, sec * SECTOR);
 global.copy(out, globalSector * SECTOR);
 writeFileSync(outPath, out);
 
@@ -661,11 +790,12 @@ const report = {
   buildings: stats.buildings, buildingParts: stats.buildingParts, buildingsWithDefaultHeight: stats.defaultHeights,
   buildingsWithColour: stats.colouredBuildings, roads: stats.roads, roadKm: +stats.roadKm.toFixed(2), areas: stats.areas,
   streetNames: stats.names.size, spawn: { from: spawnFrom, metres: spawn.map((v) => +v.toFixed(1)) },
-  largestTile: { at: worst, bytes: maxBytes, maxVerts }, fileBytes: out.length,
+  largestTile: { at: worst, bytes: maxBytes, maxVerts }, largestFarTile: maxFar, fileBytes: out.length,
   places: places.length, fuelStations: places.filter((p) => p.kind === 1).length, mechanics: places.filter((p) => p.kind === 2).length,
   minimapSegments: segs.length, globalBytes: global.length,
   terrain: dem ? dem.source : 'flat', extraFiles: extraPaths,
+  guessedHeights: levelStats,
   coastKm: +stats.coastKm.toFixed(2), seaGroundCells: stats.seaCells, featuresOutsideBox: stats0.outside,
 };
 if (reportPath) writeFileSync(reportPath, JSON.stringify({ ...report, streetNameList: [...stats.names].sort(), placeList: places.map((p) => names[p.name]) }, null, 2));
-console.log(`osm2map: ${report.buildings} buildings (${report.buildingsWithDefaultHeight} with a guessed height), ${report.roads} roads (${report.roadKm} km), ${report.areas} areas, ${report.places} places (${report.fuelStations} fuel, ${report.mechanics} mechanics), ${tilesX}x${tilesZ} tiles, largest tile ${maxBytes} bytes, ${out.length} bytes total`);
+console.log(`osm2map: ${report.buildings} buildings (${report.buildingsWithDefaultHeight} with a guessed height), ${report.roads} roads (${report.roadKm} km), ${report.areas} areas, ${report.places} places (${report.fuelStations} fuel, ${report.mechanics} mechanics), ${tilesX}x${tilesZ} tiles, largest tile ${maxBytes} bytes (far ${maxFar}), ${out.length} bytes total`);
