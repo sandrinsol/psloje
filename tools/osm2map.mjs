@@ -39,7 +39,7 @@
 //           u16 ngroups, u16 nsegs, u16 nflatVerts, u16 pad
 //           (vertices: the flat faces' first, then each group's own range)
 //           verts  nverts x { i16 x, y, z, pad }
-//           faces  nfaces x { u16 v[4], u8 u0, v0, u1, v1, u8 tex|layer<<4,
+//           faces  nfaces x { u16 v[4], u8 u0, v0, u1, v1, u8 tex|layer<<6 (tex 63: none),
 //                             u8 r, g, b }   (v[3] == 0xffff: triangle)
 //           edges  nedges x { i16 x0, z0, x1, z1 }
 //           height 9 x 9 i16: ground Y every 8 m (row = z), for the car
@@ -78,7 +78,7 @@ const MAX_TILE_BYTES = 20 * 1024; // must match TILE_SLOT_BYTES in src/world.h
 const MAX_FAR_BYTES = 6 * 1024;   // must match FAR_SLOT_BYTES in src/world.h
 
 // Texture ids: must match the order in tools/maketex.mjs.
-const TEX = { asphalt: 0, paving: 1, wallA: 2, wallB: 3, wallC: 4, ground: 5, grass: 6, sand: 7, none: 15 };
+const TEX = { asphalt: 0, paving: 1, wallA: 2, wallB: 3, wallC: 4, ground: 5, grass: 6, sand: 7, none: 63 };
 // Flat layers (drawn back to front): ground, areas, footways, roads.
 const LAYER = { ground: 0, area: 1, foot: 2, road: 3 };
 
@@ -864,7 +864,7 @@ function encodeTile(t, near) {
   for (const f of faces) {
     for (let k = 0; k < 4; k++) buf.writeUInt16LE(remap(f.v[k]), o + k * 2);
     f.uv.forEach((u, k) => buf.writeUInt8(u, o + 8 + k));
-    buf.writeUInt8(f.tex | (f.layer << 4), o + 12);
+    buf.writeUInt8(f.tex | (f.layer << 6), o + 12);
     f.rgb.forEach((c, k) => buf.writeUInt8(clampByte(c), o + 13 + k));
     o += 16;
   }

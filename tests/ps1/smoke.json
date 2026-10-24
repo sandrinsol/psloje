@@ -28,8 +28,9 @@
     { "tap": "TRIANGLE" },
     { "wait": 10 },
     { "assertRam": "bigmap_open", "as": "s32", "equals": 0 },
-    { "write": "game_minutes", "value": 1320 },
-    { "wait": 4 },
+    { "write": "game_minutes", "value": 1320, "as": "u32" },
+    { "wait": 30 },
+    { "assertRam": "game_minutes", "as": "s32", "min": 1320, "max": 1322 },
     { "assert": "goldens/night.png", "ignore": [{ "x": 0, "y": 4, "w": 320, "h": 12 }, { "x": 0, "y": 220, "w": 320, "h": 20 }] },
     { "assertRam": "cd_errors", "as": "s32", "equals": 0 }
   ]

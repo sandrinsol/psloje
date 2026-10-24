@@ -14,6 +14,7 @@
 		<directory_tree>
 			<file name="SYSTEM.CNF" type="data" source="${PROJECT_SOURCE_DIR}/system.cnf" />
 			<file name="GAME.EXE"   type="data" source="game.exe" />
+			<file name="CITY.TIM"   type="data" source="${PROJECT_SOURCE_DIR}/assets/city.tim" />
 			<file name="MAP.BIN"    type="data" source="map.bin" />
 			<!-- Padding after the last file: real drives misread the very end of a disc. -->
 			<dummy sectors="150"/>

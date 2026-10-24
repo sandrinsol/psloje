@@ -41,8 +41,6 @@ if(PSN00BSDK_TARGET STREQUAL "mipsel-linux-gnu")
 		target_sources(game PRIVATE src/libgcc_mips1.c)
 	endif()
 endif()
-# City textures (tools/maketex.mjs).
-psn00bsdk_target_incbin(game PRIVATE city_tim assets/city.tim)
 
 # The city: data/vlora.osm (an OpenStreetMap export) when it's there, else the
 # made-up test town. MAP_OSM / MAP_SPAWN / MAP_NAME override.
@@ -76,5 +74,5 @@ psn00bsdk_add_cd_image(
 	iso      # Target name
 	game     # Output file name (= game.bin + game.cue)
 	iso.xml  # Path to config file
-	DEPENDS game map system.cnf ${CMAKE_BINARY_DIR}/map.bin   # the file too: rebuild the disc when only the map changes
+	DEPENDS game map system.cnf ${CMAKE_BINARY_DIR}/map.bin ${PROJECT_SOURCE_DIR}/assets/city.tim   # the file too: rebuild the disc when only the map changes
 )

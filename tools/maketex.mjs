@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// Generates the city's placeholder textures: assets/city.tim (8-bit, one
-// shared 256-colour CLUT) and src/textures.h (each texture's average colour,
-// used for far-away untextured polygons). Generic patterns for now; swap in
-// textures made from photos of Vlora later (same layout).
+// Generates the city's textures: assets/city.tim (8-bit, one shared
+// 256-colour CLUT; CITY.TIM on the disc) and src/textures.h (each texture's
+// average colour, used for far-away untextured polygons).
 //
 //   node tools/maketex.mjs
 //
-// Layout: 8 textures of 64x64 in a 128x256 texture page at VRAM (640,256);
-// texture i sits at u = (i & 1) * 64, v = (i >> 1) * 64. CLUT at (640,248).
+// Layout: up to 32 textures of 64x64 in two 256x256 texture pages side by
+// side at VRAM (640,256) and (768,256); texture i is in page i >> 4 at
+// u = (i & 3) * 64, v = (i >> 2 & 3) * 64. CLUT at (640,248). The third page
+// (896,256) holds the map's name signs (tools/osm2map.mjs).
 // Order (ids used by tools/osm2map.mjs): asphalt, paving, wallA, wallB, wallC,
 // ground, grass, sand.
 import { writeFileSync } from 'node:fs';
@@ -74,7 +75,8 @@ const indexed = textures.map((t) => t.map((c) => {
 }));
 if (palette.size > 256) throw new Error(`${palette.size} colours: more than a CLUT holds`);
 
-const W = 128, H = 256;
+if (textures.length > 32) throw new Error('more than 32 textures');
+const W = 512, H = 256;   // pixels: two pages
 const clutBytes = 12 + 512, imageBytes = 12 + W * H;
 const tim = Buffer.alloc(8 + clutBytes + imageBytes);
 tim.writeUInt32LE(0x10, 0);
@@ -86,7 +88,7 @@ o += clutBytes;
 tim.writeUInt32LE(imageBytes, o); tim.writeUInt16LE(TPAGE_X, o + 4); tim.writeUInt16LE(TPAGE_Y, o + 6); tim.writeUInt16LE(W / 2, o + 8); tim.writeUInt16LE(H, o + 10);
 o += 12;
 indexed.forEach((t, i) => {
-  const u0 = (i & 1) * 64, v0 = (i >> 1) * 64;
+  const u0 = (i >> 4) * 256 + (i & 3) * 64, v0 = (i >> 2 & 3) * 64;
   t.forEach((p, j) => { tim[o + (v0 + Math.floor(j / S)) * W + u0 + (j % S)] = p; });
 });
 writeFileSync(path.join(root, 'assets', 'city.tim'), tim);
