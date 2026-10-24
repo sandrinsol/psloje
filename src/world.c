@@ -53,7 +53,7 @@ typedef struct {
 	uint32_t global_sector;
 } MapHeader;
 
-#define GLOBAL_BYTES (96 * 1024)   /* must match tools/osm2map.mjs */
+#define GLOBAL_BYTES (160 * 1024)   /* must match tools/osm2map.mjs */
 
 Colour fog_colour = { 172, 190, 204 };
 Colour light = { 128, 128, 128 };

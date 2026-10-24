@@ -161,6 +161,8 @@ int main(int argc, const char **argv) {
 		if (frame_count < 150) {
 			/* The map's name for the first seconds. */
 			prim = FntSort(b->ot, prim, 160 - 4 * (int)strlen(map_name), 112, map_name);
+			/* Required by the map data's licence (ODbL). */
+			prim = FntSort(b->ot, prim, 40, 128, "(C) OPENSTREETMAP CONTRIBUTORS");
 		}
 
 		frame_count++;

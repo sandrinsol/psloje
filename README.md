@@ -6,9 +6,10 @@ Mercedes-Benz W124 taxi through the city's real streets, built from
 [PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK) and tested with the
 [ps1-test](https://github.com/sandrinsol/ps1-test) emulator harness and MCP server.
 
-**Status: driving, fares and day/night work, running on a made-up test
-town.** The real Vlora map needs an OpenStreetMap export in `data/vlora.osm`
-(see [Map data](#map-data)); until then the game says `TEST TOWN (NOT VLORA)`.
+**Status: driving, fares and day/night work in real Vlora**: Sheshi i
+Flamurit, the old town, the port and the Lungomare down to Uji i Ftohtë, from
+OpenStreetMap (4,392 buildings, 232 km of streets with their names, 655
+places, the coastline and the sea).
 
 | Button | Action |
 |---|---|
@@ -40,8 +41,7 @@ Every push builds the disc on GitHub: open the latest run of the
 
 1. Drive around the centre: chase camera, the city streamed from the CD in
    64 m tiles, buildings you can't drive through, fog, 30 fps. **Done.**
-2. Day/night cycle **(done)**; the whole Lungomare out to Uji i Ftohtë (needs
-   the map data).
+2. Day/night cycle and the whole Lungomare out to Uji i Ftohtë. **Done.**
 3. Fares: passengers, the meter, money, a minimap with the destination arrow,
    street names on the HUD. **Done.**
 4. Fuel and a gas station, damage and the mechanic, saves on the memory card.
@@ -51,13 +51,10 @@ Every push builds the disc on GitHub: open the latest run of the
 ## Map data
 
 `tools/osm2map.mjs` turns an OpenStreetMap export into `MAP.BIN`, which the
-build puts on the disc. The build uses `data/vlora.osm` when it exists (and
-starts the taxi at Sheshi i Flamurit), otherwise `tools/test/testtown.osm`.
-
-To get `data/vlora.osm`: on openstreetmap.org, find central Vlora, click
-**Export**, choose **Manually select a different area**, draw a box from Sheshi
-i Flamurit to the Lungomare and the port, and save the `.osm` file. For a bigger
-area use the Overpass API link on the same page.
+build puts on the disc. The build uses `data/vlora.osm` (and starts the taxi
+at Sheshi i Flamurit); without it, the made-up `tools/test/testtown.osm`.
+`tools/fetch-vlora.sh` downloads `data/vlora.osm` again from the OpenStreetMap
+API (see [data/README.md](data/README.md)).
 
 From the data the converter takes:
 
@@ -75,13 +72,19 @@ From the data the converter takes:
 - **Minimap and street names**: the drivable roads and their `name=`. Albanian
   letters become plain capitals for the PS1 font (ë → E, ç → C).
 
+- **Sea**: `natural=coastline` (land on its left); the ground is classified as
+  land or sea, in 4 m strips near the shore, and the coast is a collision edge.
+
 The build writes `build/map-report.json` (buildings, guessed heights, roads,
-street names, tile sizes). Not yet handled: the coastline (the sea), terrain
-height, and inner courtyards of multipolygon buildings.
+street names, places, tile sizes). **Accuracy:** street layout, building
+footprints, the coast and names come from OpenStreetMap; most Vlora buildings
+have no height there (4,339 of 4,392), so their heights are guesses by
+building type. Not yet handled: terrain height (Kuzum Baba hill), and inner
+courtyards of multipolygon buildings.
 
 Map data © OpenStreetMap contributors, available under the
 [Open Database License](https://www.openstreetmap.org/copyright); the game
-must credit it (planned for the credits screen).
+shows the credit at start.
 
 ## Build
 
