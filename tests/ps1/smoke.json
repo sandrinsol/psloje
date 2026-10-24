@@ -1,0 +1,17 @@
+{
+  "rom": "build/game.cue",
+  "steps": [
+    { "waitUntil": { "address": "frame_count", "as": "u32", "op": "gte", "value": 30 }, "maxFrames": 1500 },
+    { "assertRam": "cd_errors", "as": "s32", "equals": 0 },
+    { "assertRam": "tiles_loaded", "as": "s32", "min": 9 },
+    { "assertRam": "speed_kmh", "as": "s32", "equals": 0 },
+    { "assertRam": "faces_drawn", "as": "s32", "min": 50 },
+    { "assert": "goldens/start.png", "ignore": [{ "x": 0, "y": 220, "w": 320, "h": 20 }] },
+    { "hold": "R2", "frames": 180 },
+    { "assertRam": "speed_kmh", "as": "s32", "min": 15 },
+    { "assertRam": "fps", "as": "s32", "min": 25 },
+    { "hold": "L2", "frames": 120 },
+    { "assertRam": "speed_kmh", "as": "s32", "max": 5 },
+    { "assertRam": "cd_errors", "as": "s32", "equals": 0 }
+  ]
+}
