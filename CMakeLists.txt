@@ -20,8 +20,8 @@ project(
 	DESCRIPTION "GRID SOULS"
 )
 
-psn00bsdk_add_executable(game GPREL src/main.c src/game.c src/draw.c)
-target_compile_options(game PRIVATE -O2 -Wall -Wno-unused-function)
+psn00bsdk_add_executable(game GPREL src/main.c src/game.c src/draw.c src/models.c src/audio.c)
+target_compile_options(game PRIVATE -O2 -Wall -Wno-unused-function -Wno-unused-value)
 # Debian/Ubuntu's mipsel-linux-gnu libgcc is built for MIPS32r2 with hard-float
 # helpers, which the PS1 can't run. Link libmips1rt (64-bit maths and soft-float
 # for MIPS I, installed by .devcontainer/install-psn00bsdk.sh) ahead of it; without
@@ -40,8 +40,11 @@ if(PSN00BSDK_TARGET STREQUAL "mipsel-linux-gnu")
 	endif()
 endif()
 
-# Glyphs (tools/makeglyphs.mjs makes assets/glyphs.tim and src/glyphs.h).
+# Glyphs (tools/makeglyphs.mjs) and the floor's slabs (tools/makeslabs.mjs).
 psn00bsdk_target_incbin(game PRIVATE glyphs_tim assets/glyphs.tim)
+psn00bsdk_target_incbin(game PRIVATE slabs_tim assets/slabs.tim)
+# Sound effects (tools/makesfx.mjs: SPU ADPCM).
+psn00bsdk_target_incbin(game PRIVATE sfx_bin assets/sfx.bin)
 
 psn00bsdk_add_cd_image(
 	iso      # Target name
