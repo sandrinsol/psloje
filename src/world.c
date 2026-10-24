@@ -20,8 +20,15 @@
 
 typedef struct {
 	uint16_t nverts, nfaces, nedges, nflat;
-	int16_t minx, minz, maxx, maxz, miny, pad;
+	int16_t minx, minz, maxx, maxz, miny, flags;   /* flags 1: height grid after the edges */
+	uint16_t ngroups, pad;
 } TileHeader;
+
+/* One building: culled as a whole, fine faces near, coarse ones far. */
+typedef struct {
+	int16_t cx, cz, r, top, bottom;   /* tile-local units; top/bottom are Y (negative = up) */
+	uint16_t first, nfine, ncoarse;   /* faces; coarse follow the fine (0: use the fine) */
+} Group;
 
 typedef struct {
 	uint16_t v[4];
@@ -41,6 +48,8 @@ typedef struct {
 	SVECTOR *verts;
 	Face *faces;
 	Edge *edges;
+	int16_t *heights;   /* 9 x 9 ground Y every 8 m, or 0 */
+	Group *groups;
 } Slot;
 
 typedef struct {
@@ -225,6 +234,8 @@ static void slot_ready(Slot *s) {
 	s->verts = (SVECTOR *)(p + sizeof(TileHeader));
 	s->faces = (Face *)(s->verts + s->h->nverts);
 	s->edges = (Edge *)(s->faces + s->h->nfaces);
+	s->heights = s->h->flags & 1 ? (int16_t *)(s->edges + s->h->nedges) : 0;
+	s->groups = (Group *)(s->heights ? s->heights + 81 : (int16_t *)(s->edges + s->h->nedges));
 	s->state = SLOT_READY;
 	tiles_loaded++;
 }
@@ -443,12 +454,19 @@ static void emit(const Face *f, DVECTOR *p, int32_t *z, int u0, int v0, int u1, 
 	faces_drawn++;
 }
 
+/* Depth-sorted, also the ground (hills hide what's behind them). Ground faces
+ * sort by their farthest corner so they go under what stands on them; areas,
+ * footways and roads by their middle, a step nearer per layer so they go on
+ * top of the ground. */
 static inline uint32_t *ot_slot(const Face *f, int flat, int32_t *z, int n) {
-	if (flat)
-		return ot_base + OT_LEN - 1 - (f->texlayer >> 4);
-	int sum = 0;
-	for (int i = 0; i < n; i++) sum += z[i];
-	int otz = (n == 4 ? sum >> 2 : sum / 3) >> 4;
+	int sum = 0, zmax = 0;
+	for (int i = 0; i < n; i++) {
+		sum += z[i];
+		if (z[i] > zmax) zmax = z[i];
+	}
+	int avg = n == 4 ? sum >> 2 : sum / 3;
+	int layer = f->texlayer >> 4;
+	int otz = flat ? ((layer == 0 ? zmax : avg) >> 4) + 3 - layer : avg >> 4;
 	if (otz < 1) otz = 1;
 	if (otz > OT_LEN - 8) otz = OT_LEN - 8;
 	return ot_base + otz;
@@ -511,6 +529,36 @@ static void draw_split(const Face *f, int flat, const SVECTOR *c, int u0, int v0
 	}
 }
 
+static void draw_faces(const Face *f, int n, const SVECTOR *v, int flat) {
+	for (int k = 0; k < n; k++, f++) {
+		int tri = f->v[3] == 0xffff;
+		int nv = tri ? 3 : 4;
+		DVECTOR p[4];
+		int32_t z[4];
+		int nearc = 0, farc = 0;
+		for (int j = 0; j < nv; j++) {
+			p[j] = sxy[f->v[j]];
+			z[j] = sz[f->v[j]];
+			if (z[j] < NEAR_Z) nearc++;
+			if (z[j] > FOG_END) farc++;
+		}
+		if (nearc == nv || farc == nv)
+			continue;
+		int split = nearc > 0;
+		for (int j = 0; !split && j < nv; j++) split = !on_screen(p[j].vx, p[j].vy);
+		if (!split) split = too_big(p, nv);
+		if (split) {
+			SVECTOR c[4];
+			for (int j = 0; j < 4; j++) c[j] = v[f->v[tri && j == 3 ? 2 : j]];
+			draw_split(f, flat, c, f->u0, f->v0, f->u1, f->v1, 0);
+			continue;
+		}
+		if (!front_facing(p[0], p[1], p[2]) && (tri || !front_facing(p[1], p[3], p[2])))
+			continue;
+		emit(f, p, z, f->u0, f->v0, f->u1, f->v1, tri, ot_slot(f, flat, z, nv));
+	}
+}
+
 /* Is any part of the tile's box in front of the camera and inside the view? */
 static int tile_visible(const Camera *cam, const Slot *s, int32_t ox, int32_t oz) {
 	const TileHeader *h = s->h;
@@ -563,34 +611,25 @@ static void draw_tile(const Camera *cam, const Slot *s) {
 		gte_stsz(&sz[i]);
 	}
 
-	const Face *f = s->faces;
-	for (int k = 0; k < h->nfaces; k++, f++) {
-		int tri = f->v[3] == 0xffff;
-		int nv = tri ? 3 : 4;
-		int flat = k < h->nflat;
-		DVECTOR p[4];
-		int32_t z[4];
-		int nearc = 0, farc = 0;
-		for (int j = 0; j < nv; j++) {
-			p[j] = sxy[f->v[j]];
-			z[j] = sz[f->v[j]];
-			if (z[j] < NEAR_Z) nearc++;
-			if (z[j] > FOG_END) farc++;
-		}
-		if (nearc == nv || farc == nv)
+	draw_faces(s->faces, h->nflat, v, 1);
+
+	/* Buildings: one bounding-sphere test each (camera space, unscaled), then
+	 * fine faces if any part is within texture distance, else coarse ones. */
+	const Group *g = s->groups;
+	for (int i = 0; i < h->ngroups; i++, g++) {
+		int32_t x = ox + g->cx - cam->x, y = ((g->top + g->bottom) >> 1) - cam->y, z = oz + g->cz - cam->z;
+		int32_t r = g->r + ((g->bottom - g->top) >> 1);   /* sphere around the box, roughly */
+		int32_t cz = (cam->m.m[2][0] * x + cam->m.m[2][1] * y + cam->m.m[2][2] * z) >> 12;
+		if (cz + r < NEAR_Z / GTE_SCALE || (cz - r) * GTE_SCALE > FOG_END)
 			continue;
-		int split = nearc > 0;
-		for (int j = 0; !split && j < nv; j++) split = !on_screen(p[j].vx, p[j].vy);
-		if (!split) split = too_big(p, nv);
-		if (split) {
-			SVECTOR c[4];
-			for (int j = 0; j < 4; j++) c[j] = v[f->v[tri && j == 3 ? 2 : j]];
-			draw_split(f, flat, c, f->u0, f->v0, f->u1, f->v1, 0);
+		int32_t cx = (cam->m.m[0][0] * x + cam->m.m[0][1] * y + cam->m.m[0][2] * z) >> 12;
+		/* Outside the sides of the view (half-width 0.8, sphere: r * sqrt(1 + 0.64)). */
+		if (cx * 5 > cz * 4 + r * 7 || -cx * 5 > cz * 4 + r * 7)
 			continue;
-		}
-		if (!front_facing(p[0], p[1], p[2]) && (tri || !front_facing(p[1], p[3], p[2])))
-			continue;
-		emit(f, p, z, f->u0, f->v0, f->u1, f->v1, tri, ot_slot(f, flat, z, nv));
+		if ((cz - r) * GTE_SCALE < TEX_DIST || !g->ncoarse)
+			draw_faces(s->faces + g->first, g->nfine, v, 0);
+		else
+			draw_faces(s->faces + g->first + g->nfine, g->ncoarse, v, 0);
 	}
 }
 
@@ -618,6 +657,24 @@ static int32_t isqrt(int32_t v) {
 		bit >>= 2;
 	}
 	return r;
+}
+
+int32_t world_ground_y(int32_t x, int32_t z) {
+	if (x < 0 || z < 0)
+		return 0;
+	int tx = x / TILE_UNITS, tz = z / TILE_UNITS;
+	int i = find_slot(tx, tz);
+	if (i < 0 || slots[i].state != SLOT_READY || !slots[i].heights)
+		return 0;
+	/* 8 m = 128 units per grid step; bilinear. */
+	int32_t lx = x - tx * TILE_UNITS, lz = z - tz * TILE_UNITS;
+	int gx = lx >> 7, gz = lz >> 7, fx = lx & 127, fz = lz & 127;
+	if (gx > 7) gx = 7, fx = 128;
+	if (gz > 7) gz = 7, fz = 128;
+	const int16_t *h = slots[i].heights + gz * 9 + gx;
+	int32_t a = h[0] + ((h[1] - h[0]) * fx >> 7);
+	int32_t b = h[9] + ((h[10] - h[9]) * fx >> 7);
+	return a + ((b - a) * fz >> 7);
 }
 
 int world_collide(int32_t *x, int32_t *z, int32_t radius, int32_t *nx, int32_t *nz) {

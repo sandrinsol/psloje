@@ -237,8 +237,9 @@ static inline uint32_t *depth_slot(uint32_t *ot, int32_t cz) {
 /* A see-through column 1.6 m wide and 12 m tall over a place. */
 static uint8_t *beacon(const Camera *cam, const Place *p, int r, int g, int b, uint32_t *ot, uint8_t *prim) {
 	DVECTOR lo, hi;
-	int32_t cz = project(cam, p->x, 0, p->z, &lo);
-	if (!cz || !project(cam, p->x, -12 * UNIT, p->z, &hi))
+	int32_t gy = world_ground_y(p->x, p->z);
+	int32_t cz = project(cam, p->x, gy, p->z, &lo);
+	if (!cz || !project(cam, p->x, gy - 12 * UNIT, p->z, &hi))
 		return prim;
 	int w = 13 * 200 / cz + 1;   /* 0.8 m each side */
 	if (lo.vx + w < 0 || lo.vx - w > 320 || lo.vy < 0 || hi.vy > 240)
@@ -260,8 +261,9 @@ static uint8_t *beacon(const Camera *cam, const Place *p, int r, int g, int b, u
 /* The waiting passenger: a person-sized figure next to the kerb. */
 static uint8_t *passenger(const Camera *cam, const Place *p, uint32_t *ot, uint8_t *prim) {
 	DVECTOR feet, head;
-	int32_t cz = project(cam, p->x, 0, p->z, &feet);
-	if (!cz || !project(cam, p->x, -28, p->z, &head))   /* 1.75 m */
+	int32_t gy = world_ground_y(p->x, p->z);
+	int32_t cz = project(cam, p->x, gy, p->z, &feet);
+	if (!cz || !project(cam, p->x, gy - 28, p->z, &head))   /* 1.75 m */
 		return prim;
 	int w = 4 * 200 / cz + 1;   /* 0.25 m each side */
 	if (feet.vx + w < 0 || feet.vx - w > 320 || feet.vy < 0 || head.vy > 240)
@@ -290,13 +292,17 @@ static uint8_t *headlights(const Car *car, const Camera *cam, uint32_t *ot, uint
 	int32_t x = CAR_TO_WORLD(car->x), z = CAR_TO_WORLD(car->z);
 	static const int16_t shape[4][2] = { { -100, 720 }, { 100, 720 }, { -18, 40 }, { 18, 40 } };  /* 1/16 m: side, ahead (45 m) */
 	DVECTOR p[4];
+	int32_t near = 1 << 30;
 	for (int i = 0; i < 4; i++) {
 		int32_t px = x + ((fx * shape[i][1] + rx * shape[i][0]) >> 12);
 		int32_t pz = z + ((fz * shape[i][1] + rz * shape[i][0]) >> 12);
-		if (!project(cam, px, 0, pz, &p[i]))
+		int32_t cz = project(cam, px, world_ground_y(px, pz) - 1, pz, &p[i]);
+		if (!cz)
 			return prim;
+		if (cz < near) near = cz;
 	}
-	uint32_t *slot = ot + OT_LEN - 6;   /* above the roads, below everything else */
+	/* Just in front of the ground and road under its near end. */
+	uint32_t *slot = depth_slot(ot, near) - 1;
 	POLY_G4 *q = (POLY_G4 *)prim;
 	setPolyG4(q);
 	setSemiTrans(q, 1);
