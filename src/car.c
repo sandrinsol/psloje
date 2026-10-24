@@ -29,6 +29,8 @@ void car_reset(Car *car, int32_t world_x, int32_t world_z, int heading) {
 	car->steer = 0;
 	car->speed = 0;
 	car->bumps = 0;
+	car->y = world_ground_y(world_x, world_z);
+	car->pitch = 0;
 }
 
 int car_kmh(const Car *car) {
@@ -99,6 +101,16 @@ void car_tick(Car *car, const CarInput *in) {
 		else vlong = 0;
 	}
 	vlong -= vlong >> 10;                 /* air drag */
+	/* Hills: ground under the front and rear axles (1.4 m each way). Gravity
+	 * along the slope: 9.8 m/s^2 * rise / 2.8 m, in car units per tick ~ 4 x
+	 * the rise in world units. */
+	int32_t cx = CAR_TO_WORLD(car->x), cz = CAR_TO_WORLD(car->z);
+	int32_t hf = world_ground_y(cx + (fx * 22 >> 12), cz + (fz * 22 >> 12));
+	int32_t hb = world_ground_y(cx - (fx * 22 >> 12), cz - (fz * 22 >> 12));
+	int32_t rise = hb - hf;               /* > 0: front higher (Y is down) */
+	vlong -= rise * 4;
+	car->y = (hf + hb) >> 1;
+	car->pitch += ((rise * 233 >> 4) - car->pitch) >> 2;   /* atan(rise / 2.8 m), eased */
 	if (in->handbrake) {
 		vlong -= vlong >> 6;
 		vlat -= vlat >> 5;                /* rear lets go: drift */
@@ -144,7 +156,8 @@ void car_camera(const Car *car, Camera *cam, int snap) {
 	int32_t cx = CAR_TO_WORLD(car->x), cz = CAR_TO_WORLD(car->z);
 	cam->x = cx - (isin(cam->heading) * CAM_DIST >> 12);
 	cam->z = cz - (icos(cam->heading) * CAM_DIST >> 12);
-	cam->y = -CAM_HEIGHT;
+	if (snap) cam->y = car->y - CAM_HEIGHT;
+	else cam->y += (car->y - CAM_HEIGHT - cam->y) >> 2;
 	camera_update(cam);
 }
 
@@ -154,10 +167,13 @@ uint8_t *car_draw(const Car *car, const Camera *cam, uint32_t *ot, uint8_t *prim
 	int h = car->heading >> 8;
 	int s = isin(h), c = icos(h);
 	/* car space -> world: columns are the car's right, down and forward. */
-	MATRIX local = { { { c, 0, s }, { 0, 4096, 0 }, { -s, 0, c } }, { 0, 0, 0 } };
-	MATRIX m;
+	int sp = isin(car->pitch), cp = icos(car->pitch);
+	MATRIX yaw = { { { c, 0, s }, { 0, 4096, 0 }, { -s, 0, c } }, { 0, 0, 0 } };
+	MATRIX tilt = { { { 4096, 0, 0 }, { 0, cp, -sp }, { 0, sp, cp } }, { 0, 0, 0 } };   /* nose up on slopes */
+	MATRIX local, m;
+	MulMatrix0(&yaw, &tilt, &local);
 	MulMatrix0((MATRIX *)&cam->gm, &local, &m);
-	int32_t dx = CAR_TO_WORLD(car->x) - cam->x, dy = -cam->y, dz = CAR_TO_WORLD(car->z) - cam->z;
+	int32_t dx = CAR_TO_WORLD(car->x) - cam->x, dy = car->y - cam->y, dz = CAR_TO_WORLD(car->z) - cam->z;
 	m.t[0] = (cam->m.m[0][0] * dx + cam->m.m[0][1] * dy + cam->m.m[0][2] * dz) * GTE_SCALE >> 12;
 	m.t[1] = (cam->m.m[1][0] * dx + cam->m.m[1][1] * dy + cam->m.m[1][2] * dz) * GTE_SCALE >> 12;
 	m.t[2] = (cam->m.m[2][0] * dx + cam->m.m[2][1] * dy + cam->m.m[2][2] * dz) * GTE_SCALE >> 12;

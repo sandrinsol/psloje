@@ -85,6 +85,8 @@ void camera_update(Camera *cam);
 void gte_load_matrix(const MATRIX *m);
 /* Adds the visible city to the ordering table. Returns the new prim pointer. */
 uint8_t *world_draw(const Camera *cam, uint32_t *ot, uint8_t *prims, uint8_t *prims_end);
+/* Ground Y (world units, negative = up) at (x, z), from the loaded tiles. */
+int32_t world_ground_y(int32_t x, int32_t z);
 /* Pushes a circle (centre in 1/256 m, radius in 1/256 m) out of building
  * walls. Returns 1 if it touched one; *nx, *nz = the push direction (4096 = 1). */
 int world_collide(int32_t *x, int32_t *z, int32_t radius, int32_t *nx, int32_t *nz);

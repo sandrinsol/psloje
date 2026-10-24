@@ -160,9 +160,11 @@ int main(int argc, const char **argv) {
 		prim = game_draw_hud(&taxi, &camera, b->ot, prim);
 		if (frame_count < 150) {
 			/* The map's name for the first seconds. */
-			prim = FntSort(b->ot, prim, 160 - 4 * (int)strlen(map_name), 112, map_name);
-			/* Required by the map data's licence (ODbL). */
-			prim = FntSort(b->ot, prim, 40, 128, "(C) OPENSTREETMAP CONTRIBUTORS");
+			prim = FntSort(b->ot, prim, 160 - 4 * (int)strlen(map_name), 76, map_name);
+			/* Credits the data's licences require (ODbL, Copernicus). */
+			prim = FntSort(b->ot, prim, 40, 92, "(C) OPENSTREETMAP CONTRIBUTORS");
+			prim = FntSort(b->ot, prim, 28, 104, "BUILDINGS: MICROSOFT VIA OVERTURE");
+			prim = FntSort(b->ot, prim, 28, 116, "TERRAIN: COPERNICUS DEM (EU, ESA)");
 		}
 
 		frame_count++;

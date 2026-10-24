@@ -51,6 +51,9 @@ if(NOT DEFINED MAP_OSM)
 		set(MAP_OSM "${PROJECT_SOURCE_DIR}/data/vlora.osm")
 		set(MAP_SPAWN "Sheshi i Flamurit")
 		set(MAP_NAME "VLORA")
+		# Buildings OSM is missing (Overture / Microsoft) and the terrain (Copernicus DEM).
+		set(MAP_ARGS --extra "${PROJECT_SOURCE_DIR}/data/vlora-extra-buildings.osm" --dem "${PROJECT_SOURCE_DIR}/data/vlora-dem.json")
+		set(MAP_DEPS "${PROJECT_SOURCE_DIR}/data/vlora-extra-buildings.osm" "${PROJECT_SOURCE_DIR}/data/vlora-dem.json")
 	else()
 		set(MAP_OSM "${PROJECT_SOURCE_DIR}/tools/test/testtown.osm")
 		set(MAP_SPAWN "Test Square")
@@ -61,8 +64,8 @@ find_program(NODE node REQUIRED)
 add_custom_command(
 	OUTPUT  map.bin map-report.json
 	COMMAND ${NODE} "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs" "${MAP_OSM}" map.bin
-	        --spawn "${MAP_SPAWN}" --name "${MAP_NAME}" --report map-report.json
-	DEPENDS "${MAP_OSM}" "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs"
+	        --spawn "${MAP_SPAWN}" --name "${MAP_NAME}" --report map-report.json ${MAP_ARGS}
+	DEPENDS "${MAP_OSM}" ${MAP_DEPS} "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs"
 	COMMENT "Converting ${MAP_OSM} to MAP.BIN"
 	VERBATIM
 )
@@ -72,5 +75,5 @@ psn00bsdk_add_cd_image(
 	iso      # Target name
 	game     # Output file name (= game.bin + game.cue)
 	iso.xml  # Path to config file
-	DEPENDS game map system.cnf
+	DEPENDS game map system.cnf ${CMAKE_BINARY_DIR}/map.bin   # the file too: rebuild the disc when only the map changes
 )

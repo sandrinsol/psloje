@@ -7,9 +7,11 @@ Mercedes-Benz W124 taxi through the city's real streets, built from
 [ps1-test](https://github.com/sandrinsol/ps1-test) emulator harness and MCP server.
 
 **Status: driving, fares and day/night work in real Vlora**: Sheshi i
-Flamurit, the old town, the port and the Lungomare down to Uji i Ftohtë, from
-OpenStreetMap (4,392 buildings, 232 km of streets with their names, 655
-places, the coastline and the sea).
+Flamurit, the old town, the port and the Lungomare down to Uji i Ftohtë.
+Streets (232 km, with their names), 655 places, the coastline and the sea
+come from OpenStreetMap; 10,006 buildings from OpenStreetMap and Microsoft's
+footprints (via Overture Maps); the terrain (Kuzum Baba, the hills above the
+coast road) from the Copernicus DEM. See [data/README.md](data/README.md).
 
 | Button | Action |
 |---|---|
@@ -75,16 +77,25 @@ From the data the converter takes:
 - **Sea**: `natural=coastline` (land on its left); the ground is classified as
   land or sea, in 4 m strips near the shore, and the coast is a collision edge.
 
-The build writes `build/map-report.json` (buildings, guessed heights, roads,
-street names, places, tile sizes). **Accuracy:** street layout, building
-footprints, the coast and names come from OpenStreetMap; most Vlora buildings
-have no height there (4,339 of 4,392), so their heights are guesses by
-building type. Not yet handled: terrain height (Kuzum Baba hill), and inner
-courtyards of multipolygon buildings.
+- **More buildings** (`--extra data/vlora-extra-buildings.osm`): footprints
+  OpenStreetMap lacks.
+- **Terrain** (`--dem data/vlora-dem.json`): ground, roads and areas follow it;
+  buildings stand on their lowest corner; each tile carries an 8 m height grid
+  the car drives on (it tilts on slopes and gravity pulls along them).
+- **Per-building culling and detail**: each building is a group with a bounding
+  sphere (skipped in one test when out of view) and two sets of faces,
+  textured panels up close and one quad per wall beyond 50 m.
 
-Map data © OpenStreetMap contributors, available under the
-[Open Database License](https://www.openstreetmap.org/copyright); the game
-shows the credit at start.
+The build writes `build/map-report.json` (buildings, guessed heights, roads,
+street names, places, tile sizes). **Accuracy:** street layout, footprints,
+the coast, terrain and names come from real data; building heights are the
+exception (see [data/README.md](data/README.md)): 9,953 of 10,006 are guesses
+by building type. Not yet handled: inner courtyards of multipolygon buildings.
+
+Map data © OpenStreetMap contributors (ODbL), building footprints ©
+Microsoft via the Overture Maps Foundation (ODbL), terrain from the Copernicus
+DEM (© DLR e.V., © Airbus Defence and Space GmbH, provided under COPERNICUS by
+the EU and ESA). The game shows these credits at start.
 
 ## Build
 

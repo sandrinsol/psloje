@@ -18,6 +18,10 @@
 //   natural=coastline              the sea (ground on its right) and collision
 //   building outlines              collision edges (split into <= 32 m pieces)
 //
+// Terrain: --dem (tools/fetch-dem.py) lifts the ground, roads and areas, and
+// stands buildings on their lowest corner. --extra adds more .osm files (e.g.
+// the buildings OSM is missing, from tools/fetch-overture-buildings.py).
+//
 // Coordinates: 1 game unit = 1/16 m. X = east, Z = north, Y = down (PS1 GTE
 // convention, so heights are negative). The world is cut into 64 m tiles; each
 // tile's vertices are relative to its south-west corner so they fit in 16 bits.
@@ -29,11 +33,17 @@
 //           u16 globalSectors, char name[32], u32 globalSector,
 //           then per tile: u32 sector, u16 sectors, u16 pad
 //   tile    u16 nverts, nfaces, nedges, nflat, i16 minX, minZ, maxX, maxZ,
-//           i16 minY (tallest point, negative), u16 pad
+//           i16 minY (tallest point, negative), u16 flags (1 = height grid),
+//           u16 ngroups, u16 pad
 //           verts  nverts x { i16 x, y, z, pad }
 //           faces  nfaces x { u16 v[4], u8 u0, v0, u1, v1, u8 tex|layer<<4,
 //                             u8 r, g, b }   (v[3] == 0xffff: triangle)
 //           edges  nedges x { i16 x0, z0, x1, z1 }
+//           height 9 x 9 i16: ground Y every 8 m (row = z), for the car
+//           groups ngroups x { i16 cx, cz, radius, topY, bottomY (units),
+//                              u16 first, nFine, nCoarse }: one per building,
+//                              its fine faces then its coarse ones (nCoarse 0:
+//                              use the fine ones), all after the flat faces
 //   The first nflat faces lie on the ground (drawn first, by layer); the rest
 //   are depth-sorted.
 //   global  places, minimap road segments and names (see "Places" below)
@@ -65,9 +75,11 @@ const opt = (name) => { const i = args.indexOf(name); if (i < 0) return undefine
 const spawnName = opt('--spawn');
 const reportPath = opt('--report');
 const mapLabel = opt('--name') || 'OSM MAP';
+const extraPaths = (opt('--extra') || '').split(',').filter(Boolean);
+const demPath = opt('--dem');
 const [inPath, outPath] = args;
 if (!inPath || !outPath) {
-  console.error('usage: osm2map.mjs <map.osm> <out.bin> [--spawn "<name>"] [--report out.json]');
+  console.error('usage: osm2map.mjs <map.osm> <out.bin> [--extra more.osm,...] [--dem dem.json] [--spawn "<name>"] [--name LABEL] [--report out.json]');
   process.exit(2);
 }
 
@@ -80,21 +92,24 @@ const tagsOf = (body) => { const t = {}; for (const m of body.matchAll(/<tag\s+(
 
 const nodes = new Map();
 const nodeTags = new Map();
-for (const m of xml.matchAll(/<node\s+([^>]*?)(\/>|>([\s\S]*?)<\/node>)/g)) {
-  const a = attrs(m[1]);
-  nodes.set(a.id, [+a.lat, +a.lon]);
-  if (m[3]) nodeTags.set(a.id, tagsOf(m[3]));
-}
 const ways = new Map();
-for (const m of xml.matchAll(/<way\s+([^>]*?)>([\s\S]*?)<\/way>/g)) {
-  const a = attrs(m[1]);
-  const refs = [...m[2].matchAll(/<nd\s+ref="([^"]+)"/g)].map((r) => r[1]);
-  ways.set(a.id, { id: a.id, refs, tags: tagsOf(m[2]) });
-}
 const relations = [];
-for (const m of xml.matchAll(/<relation\s+([^>]*?)>([\s\S]*?)<\/relation>/g)) {
-  const members = [...m[2].matchAll(/<member\s+([^>]*?)\/>/g)].map((x) => attrs(x[1]));
-  relations.push({ id: attrs(m[1]).id, members, tags: tagsOf(m[2]) });
+// The main file, then extra ones (e.g. buildings OSM is missing; their ids must not clash).
+for (const text of [xml, ...extraPaths.map((p) => readFileSync(p, 'utf8'))]) {
+  for (const m of text.matchAll(/<node\s+([^>]*?)(\/>|>([\s\S]*?)<\/node>)/g)) {
+    const a = attrs(m[1]);
+    nodes.set(a.id, [+a.lat, +a.lon]);
+    if (m[3]) nodeTags.set(a.id, tagsOf(m[3]));
+  }
+  for (const m of text.matchAll(/<way\s+([^>]*?)>([\s\S]*?)<\/way>/g)) {
+    const a = attrs(m[1]);
+    const refs = [...m[2].matchAll(/<nd\s+ref="([^"]+)"/g)].map((r) => r[1]);
+    ways.set(a.id, { id: a.id, refs, tags: tagsOf(m[2]) });
+  }
+  for (const m of text.matchAll(/<relation\s+([^>]*?)>([\s\S]*?)<\/relation>/g)) {
+    const members = [...m[2].matchAll(/<member\s+([^>]*?)\/>/g)].map((x) => attrs(x[1]));
+    relations.push({ id: attrs(m[1]).id, members, tags: tagsOf(m[2]) });
+  }
 }
 if (!nodes.size) { console.error(`${inPath}: no OSM nodes found`); process.exit(1); }
 
@@ -119,9 +134,22 @@ const tilesX = Math.max(1, Math.ceil(widthM / TILE_M)), tilesZ = Math.max(1, Mat
 const inside = (x, z, margin = 0) => x >= -margin && z >= -margin && x <= widthM + margin && z <= heightM + margin;
 const stats0 = { outside: 0 };
 
+// Ground height in metres above the sea (0 without a DEM), bilinear in the
+// grid made by tools/fetch-dem.py.
+const dem = demPath ? JSON.parse(readFileSync(demPath, 'utf8')) : null;
+function elev(x, z) {
+  if (!dem) return 0;
+  const lat = minLat + z / mPerLat, lon = minLon + x / mPerLon;
+  const r = Math.max(0, Math.min(dem.rows - 1.001, (dem.north - lat) / dem.stepLat - 0.5));
+  const c = Math.max(0, Math.min(dem.cols - 1.001, (lon - dem.west) / dem.stepLon - 0.5));
+  const r0 = Math.floor(r), c0 = Math.floor(c), fr = r - r0, fc = c - c0;
+  const at = (rr, cc) => dem.decimetres[rr * dem.cols + cc] / 10;
+  return (at(r0, c0) * (1 - fc) + at(r0, c0 + 1) * fc) * (1 - fr) + (at(r0 + 1, c0) * (1 - fc) + at(r0 + 1, c0 + 1) * fc) * fr;
+}
+
 // ---- Geometry collection, per tile ----------------------------------------
 
-const tiles = Array.from({ length: tilesX * tilesZ }, (_, i) => ({ tx: i % tilesX, tz: Math.floor(i / tilesX), verts: [], vmap: new Map(), flat: [], solid: [], edges: [] }));
+const tiles = Array.from({ length: tilesX * tilesZ }, (_, i) => ({ tx: i % tilesX, tz: Math.floor(i / tilesX), verts: [], vmap: new Map(), flat: [], solid: [], groups: [], edges: [] }));
 const tileAt = (x, z) => {
   const tx = Math.min(tilesX - 1, Math.max(0, Math.floor(x / TILE_M)));
   const tz = Math.min(tilesZ - 1, Math.max(0, Math.floor(z / TILE_M)));
@@ -129,6 +157,7 @@ const tileAt = (x, z) => {
 };
 // Vertex in tile-local units; shared when identical.
 const vert = (t, x, y, z) => {
+  if (![x, y, z].every(Number.isFinite)) throw new Error(`bad vertex ${x}, ${y}, ${z}`);
   const lx = Math.round((x - t.tx * TILE_M) * UNIT), ly = Math.round(-y * UNIT), lz = Math.round((z - t.tz * TILE_M) * UNIT);
   if (Math.abs(lx) > 32000 || Math.abs(lz) > 32000 || Math.abs(ly) > 32000) throw new Error('vertex out of 16-bit range');
   const key = `${lx},${ly},${lz}`;
@@ -136,6 +165,8 @@ const vert = (t, x, y, z) => {
   if (i === undefined) { i = t.verts.length; t.verts.push([lx, ly, lz]); t.vmap.set(key, i); }
   return i;
 };
+// A point on the ground (metres): vertex at the terrain height.
+const groundVert = (t, x, z) => vert(t, x, elev(x, z), z);
 const clampByte = (v) => Math.max(0, Math.min(255, Math.round(v)));
 // face: { v: [a,b,c,d?], uv: [u0,v0,u1,v1], tex, layer, rgb }
 const addFace = (t, flat, f) => (flat ? t.flat : t.solid).push(f);
@@ -203,10 +234,17 @@ function building(poly, tags, id, isPart) {
   const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length, cz = poly.reduce((s, p) => s + p[1], 0) / poly.length;
   if (!inside(cx, cz) || poly.some(([x, z]) => !inside(x, z, 200))) { stats0.outside++; return; }
   const t = tileAt(cx, cz);
+  // On a slope the building stands on its lowest corner; the hill covers the rest.
+  const ground = Math.min(...poly.map(([x, z]) => elev(x, z)));
   const wallCol = parseColour(tags['building:colour'] || tags.colour);
   if (wallCol) stats.colouredBuildings++;
   const wallTex = (tags['building:colour'] || tags.colour) ? TEX.wallA : [TEX.wallA, TEX.wallB, TEX.wallC][hash(id) % 3];
   const roofCol = parseColour(tags['roof:colour']) || [[150, 80, 60], [130, 130, 128], [170, 160, 150]][hash(id + 'r') % 3];
+  // Each building is a group the game culls in one test (bounding sphere),
+  // with fine faces (8 m x 2-floor textured panels) for up close and coarse
+  // ones (one quad per wall) for far away.
+  const group = { fine: [], coarse: [], cx, cz, r: Math.max(...poly.map(([x, z]) => Math.hypot(x - cx, z - cz))), top: ground + h, bottom: ground + minH };
+  t.groups.push(group);
 
   // Walls: outward faces of a counter-clockwise outline, vertex order TL, TR, BL, BR
   // seen from outside.
@@ -221,6 +259,7 @@ function building(poly, tags, id, isPart) {
     const base = wallCol ? wallCol.map((c) => c / 255 * 160) : [128, 128, 128];
     const rgb = base.map((c) => clampByte(c * light));
     const cols = Math.max(1, Math.round(len / PANEL_W));
+    group.coarse.push({ v: [vert(t, x1, ground + h, z1), vert(t, x0, ground + h, z0), vert(t, x1, ground + minH, z1), vert(t, x0, ground + minH, z0)], uv: [0, 0, 63, 63], tex: wallTex, layer: 0, rgb });
     for (let c = 0; c < cols; c++) {
       const a = c / cols, bb = (c + 1) / cols;
       const ax = x0 + (x1 - x0) * a, az = z0 + (z1 - z0) * a, bx = x0 + (x1 - x0) * bb, bz = z0 + (z1 - z0) * bb;
@@ -229,7 +268,7 @@ function building(poly, tags, id, isPart) {
         const y0 = minH + (h - minH) * r / rows, y1 = minH + (h - minH) * (r + 1) / rows;
         const vSpan = Math.min(63, Math.round((y1 - y0) / (FLOOR_H * PANEL_FLOORS) * 63));
         // Viewed from outside the outline (to its right), "left" is the b end.
-        addFace(t, false, { v: [vert(t, bx, y1, bz), vert(t, ax, y1, az), vert(t, bx, y0, bz), vert(t, ax, y0, az)], uv: [0, 63 - vSpan, uSpan, 63], tex: wallTex, layer: 0, rgb });
+        group.fine.push({ v: [vert(t, bx, ground + y1, bz), vert(t, ax, ground + y1, az), vert(t, bx, ground + y0, bz), vert(t, ax, ground + y0, az)], uv: [0, 63 - vSpan, uSpan, 63], tex: wallTex, layer: 0, rgb });
       }
     }
     // Collision only for walls that reach the street.
@@ -244,7 +283,9 @@ function building(poly, tags, id, isPart) {
   }
   // Roof (seen from above: clockwise on screen = counter-clockwise in X/Z).
   for (const [a, bb, c] of triangulate(poly)) {
-    addFace(t, false, { v: [vert(t, ...[poly[a][0], h, poly[a][1]]), vert(t, poly[c][0], h, poly[c][1]), vert(t, poly[bb][0], h, poly[bb][1]), 0xffff], uv: [0, 0, 0, 0], tex: TEX.none, layer: 0, rgb: roofCol });
+    const roof = { v: [vert(t, poly[a][0], ground + h, poly[a][1]), vert(t, poly[c][0], ground + h, poly[c][1]), vert(t, poly[bb][0], ground + h, poly[bb][1]), 0xffff], uv: [0, 0, 0, 0], tex: TEX.none, layer: 0, rgb: roofCol };
+    group.fine.push(roof);
+    group.coarse.push(roof);
   }
 }
 
@@ -257,7 +298,7 @@ function flatArea(poly, layer, rgb) {
     const cx = (poly[a][0] + poly[bb][0] + poly[c][0]) / 3, cz = (poly[a][1] + poly[bb][1] + poly[c][1]) / 3;
     if (!inside(cx, cz) || [a, bb, c].some((i) => !inside(poly[i][0], poly[i][1], 300))) continue;
     const t = tileAt(cx, cz);
-    addFace(t, true, { v: [vert(t, poly[a][0], 0, poly[a][1]), vert(t, poly[c][0], 0, poly[c][1]), vert(t, poly[bb][0], 0, poly[bb][1]), 0xffff], uv: [0, 0, 0, 0], tex: TEX.none, layer, rgb });
+    addFace(t, true, { v: [groundVert(t, poly[a][0], poly[a][1]), groundVert(t, poly[c][0], poly[c][1]), groundVert(t, poly[bb][0], poly[bb][1]), 0xffff], uv: [0, 0, 0, 0], tex: TEX.none, layer, rgb });
   }
 }
 
@@ -288,7 +329,7 @@ function road(pts, tags) {
       const t = tileAt((ax + bx) / 2, (az + bz) / 2);
       const vSpan = Math.min(63, Math.round(len / n / ROAD_PIECE * 63));
       // Seen from above, travelling along the road: far-left, far-right, near-left, near-right.
-      addFace(t, true, { v: [vert(t, bx + px, 0, bz + pz), vert(t, bx - px, 0, bz - pz), vert(t, ax + px, 0, az + pz), vert(t, ax - px, 0, az - pz)], uv: [0, 0, 63, vSpan], tex, layer, rgb: [128, 128, 128] });
+      addFace(t, true, { v: [groundVert(t, bx + px, bz + pz), groundVert(t, bx - px, bz - pz), groundVert(t, ax + px, az + pz), groundVert(t, ax - px, az - pz)], uv: [0, 0, 63, vSpan], tex, layer, rgb: [128, 128, 128] });
     }
   }
   // Joints: an octagon at every inner node fills the gap where segments turn.
@@ -299,7 +340,7 @@ function joint([x, z], r, layer, tex) {
   if (!inside(x, z)) return;
   const t = tileAt(x, z);
   const p = Array.from({ length: 8 }, (_, k) => [x + r * Math.cos(k * Math.PI / 4), z + r * Math.sin(k * Math.PI / 4)]);
-  const v = p.map(([px, pz]) => vert(t, px, 0, pz));
+  const v = p.map(([px, pz]) => groundVert(t, px, pz));
   // Untextured would show a different shade from the road, so use a small patch of the texture.
   for (const [a, bb, c, d] of [[3, 2, 4, 1], [4, 1, 5, 0], [5, 0, 6, 7]]) addFace(t, true, { v: [v[a], v[bb], v[c], v[d]], uv: [8, 8, 24, 24], tex, layer, rgb: [128, 128, 128] });
 }
@@ -401,7 +442,8 @@ function coastAt(x, z) {
 const SEA = [46, 88, 128];
 function groundQuad(t, x0, z0, w, h, sea) {
   addFace(t, true, {
-    v: [vert(t, x0, 0, z0 + h), vert(t, x0 + w, 0, z0 + h), vert(t, x0, 0, z0), vert(t, x0 + w, 0, z0)],
+    v: sea ? [vert(t, x0, 0, z0 + h), vert(t, x0 + w, 0, z0 + h), vert(t, x0, 0, z0), vert(t, x0 + w, 0, z0)]
+           : [groundVert(t, x0, z0 + h), groundVert(t, x0 + w, z0 + h), groundVert(t, x0, z0), groundVert(t, x0 + w, z0)],
     uv: sea ? [0, 0, 0, 0] : [0, 0, Math.round(w / GROUND_CELL * 63), Math.round(h / GROUND_CELL * 63)],
     tex: sea ? TEX.none : TEX.ground, layer: LAYER.ground, rgb: sea ? SEA : [128, 128, 128],
   });
@@ -541,16 +583,28 @@ const tileBlobs = [];
 let maxVerts = 0, maxBytes = 0, worst = null;
 for (const t of tiles) {
   const flat = t.flat.sort((a, b) => a.layer - b.layer);
-  const faces = [...flat, ...t.solid];
+  if (t.solid.length) t.groups.push({ fine: t.solid, coarse: t.solid, cx: (t.tx + 0.5) * TILE_M, cz: (t.tz + 0.5) * TILE_M, r: TILE_M, top: 100, bottom: 0 });
+  const faces = [...flat];
+  const groupRecs = t.groups.map((g) => {
+    const first = faces.length;
+    faces.push(...g.fine, ...(g.coarse === g.fine ? [] : g.coarse));
+    return [Math.round((g.cx - t.tx * TILE_M) * UNIT), Math.round((g.cz - t.tz * TILE_M) * UNIT), Math.ceil(g.r * UNIT) + 1,
+      Math.round(-g.top * UNIT), Math.round(-g.bottom * UNIT), first, g.fine.length, g.coarse === g.fine ? g.fine.length : g.coarse.length, g.coarse === g.fine ? 1 : 0];
+  });
+  if (faces.length > 65535) throw new Error(`tile ${t.tx},${t.tz} has too many faces`);
   if (t.verts.length > MAX_TILE_VERTS) throw new Error(`tile ${t.tx},${t.tz} has ${t.verts.length} vertices (max ${MAX_TILE_VERTS}): lower the detail`);
-  const size = 20 + t.verts.length * 8 + faces.length * 16 + t.edges.length * 8;
+  // Ground height every 8 m (9 x 9 over the tile, in units, Y down) for the car.
+  const hm = [];
+  for (let j = 0; j <= 8; j++) for (let i = 0; i <= 8; i++) hm.push(Math.round(-elev(t.tx * TILE_M + i * 8, t.tz * TILE_M + j * 8) * UNIT));
+  const size = 24 + t.verts.length * 8 + faces.length * 16 + t.edges.length * 8 + hm.length * 2 + groupRecs.length * 16;
   if (size > MAX_TILE_BYTES) throw new Error(`tile ${t.tx},${t.tz} is ${size} bytes (max ${MAX_TILE_BYTES}): lower the detail`);
   const buf = Buffer.alloc(size);
   let minX = 32767, minZ = 32767, maxX = -32768, maxZ = -32768, minY = 0;
   for (const [x, y, z] of t.verts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); minY = Math.min(minY, y); }
   let o = 0;
   for (const v of [t.verts.length, faces.length, t.edges.length, flat.length]) { buf.writeUInt16LE(v, o); o += 2; }
-  for (const v of [minX, minZ, maxX, maxZ, minY, 0]) { buf.writeInt16LE(v, o); o += 2; }
+  for (const v of [minX, minZ, maxX, maxZ, minY, 1]) { buf.writeInt16LE(v, o); o += 2; }   // 1: has a height grid
+  buf.writeUInt16LE(groupRecs.length, o); o += 4;
   for (const [x, y, z] of t.verts) { buf.writeInt16LE(x, o); buf.writeInt16LE(y, o + 2); buf.writeInt16LE(z, o + 4); o += 8; }
   for (const f of faces) {
     for (let k = 0; k < 4; k++) buf.writeUInt16LE(f.v[k] ?? 0xffff, o + k * 2);
@@ -560,6 +614,13 @@ for (const t of tiles) {
     o += 16;
   }
   for (const e of t.edges) { e.forEach((v, k) => buf.writeInt16LE(v, o + k * 2)); o += 8; }
+  for (const v of hm) { buf.writeInt16LE(v, o); o += 2; }
+  for (const [gx, gz, r, top, bottom, first, nfine, ncoarse, shared] of groupRecs) {
+    for (const v of [gx, gz, r, top, bottom]) { buf.writeInt16LE(v, o); o += 2; }
+    // Coarse faces follow the fine ones; 0 = use the fine ones.
+    buf.writeUInt16LE(first, o); buf.writeUInt16LE(nfine, o + 2); buf.writeUInt16LE(shared ? 0 : ncoarse, o + 4);
+    o += 6;
+  }
   tileBlobs.push(buf);
   maxVerts = Math.max(maxVerts, t.verts.length);
   if (size > maxBytes) { maxBytes = size; worst = `${t.tx},${t.tz}`; }
@@ -602,6 +663,7 @@ const report = {
   largestTile: { at: worst, bytes: maxBytes, maxVerts }, fileBytes: out.length,
   places: places.length, fuelStations: places.filter((p) => p.kind === 1).length, mechanics: places.filter((p) => p.kind === 2).length,
   minimapSegments: segs.length, globalBytes: global.length,
+  terrain: dem ? dem.source : 'flat', extraFiles: extraPaths,
   coastKm: +stats.coastKm.toFixed(2), seaGroundCells: stats.seaCells, featuresOutsideBox: stats0.outside,
 };
 if (reportPath) writeFileSync(reportPath, JSON.stringify({ ...report, streetNameList: [...stats.names].sort(), placeList: places.map((p) => names[p.name]) }, null, 2));

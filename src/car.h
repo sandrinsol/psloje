@@ -15,6 +15,8 @@ typedef struct {
 	int32_t steer;       /* -4096 .. 4096 */
 	int32_t speed;       /* forward speed, 1/65536 m per tick (negative = reversing) */
 	int32_t bumps;       /* wall hits, for damage later */
+	int32_t y;           /* ground height, world units (negative = up) */
+	int32_t pitch;       /* nose up, 4096 per turn */
 } Car;
 
 typedef struct {
