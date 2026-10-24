@@ -25,4 +25,6 @@ void game_init(void);
 void game_update(const Car *car, int ticks);
 /* Markers for the passenger and destination, headlights at night. */
 uint8_t *game_draw_world(const Car *car, const Camera *cam, uint32_t *ot, uint8_t *prim);
+/* The passenger (*pickup = 1) or the destination, or 0 between fares. */
+const Place *game_target(int *pickup);
 uint8_t *game_draw_hud(const Car *car, const Camera *cam, uint32_t *ot, uint8_t *prim);

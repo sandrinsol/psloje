@@ -20,7 +20,7 @@ project(
 	DESCRIPTION "VLORA TAXI"
 )
 
-psn00bsdk_add_executable(game GPREL src/main.c src/world.c src/car.c src/game.c)
+psn00bsdk_add_executable(game GPREL src/main.c src/world.c src/car.c src/game.c src/route.c src/bigmap.c)
 target_compile_options(game PRIVATE -O2 -fno-ipa-ra)
 # Debian/Ubuntu's mipsel-linux-gnu libgcc is built for MIPS32r2 with hard-float
 # helpers, which the PS1 can't run. Link libmips1rt (64-bit maths and soft-float
@@ -49,10 +49,11 @@ psn00bsdk_target_incbin(game PRIVATE city_tim assets/city.tim)
 if(NOT DEFINED MAP_OSM)
 	if(EXISTS "${PROJECT_SOURCE_DIR}/data/vlora.osm")
 		set(MAP_OSM "${PROJECT_SOURCE_DIR}/data/vlora.osm")
-		set(MAP_SPAWN "Sheshi i Flamurit")
+		set(MAP_SPAWN "Teatri Petro Marko")
 		set(MAP_NAME "VLORA")
-		# Buildings OSM is missing (Overture / Microsoft) and the terrain (Copernicus DEM).
-		set(MAP_ARGS --extra "${PROJECT_SOURCE_DIR}/data/vlora-extra-buildings.osm" --dem "${PROJECT_SOURCE_DIR}/data/vlora-dem.json")
+		# Start on the boulevard in front of the theatre; buildings OSM is missing
+		# (Overture / Microsoft) and the terrain (Copernicus DEM).
+		set(MAP_ARGS --spawn-road "Bulevardi Ismail Qemali" --extra "${PROJECT_SOURCE_DIR}/data/vlora-extra-buildings.osm" --dem "${PROJECT_SOURCE_DIR}/data/vlora-dem.json")
 		set(MAP_DEPS "${PROJECT_SOURCE_DIR}/data/vlora-extra-buildings.osm" "${PROJECT_SOURCE_DIR}/data/vlora-dem.json")
 	else()
 		set(MAP_OSM "${PROJECT_SOURCE_DIR}/tools/test/testtown.osm")

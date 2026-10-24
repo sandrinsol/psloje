@@ -29,13 +29,23 @@ fps. See [data/README.md](data/README.md).
 | L2 or Down | Brake, then reverse (keyboard: Tab or the Down arrow) |
 | D-pad left/right or left stick | Steer |
 | Square | Handbrake |
+| Triangle | Open / close the big map (keyboard: A) |
+| L1 / R1 (big map) | Zoom in / out (keyboard: Q / E) |
+| D-pad (big map) | Move the map |
 
 **Fares.** A passenger waits at a place from the map (green column, green
 arrow and minimap dot). Stop next to them and they get in; drive to their
 destination (orange column) and stop. The meter starts at 300 Lek and adds
 120 Lek per km; arriving fast without hitting walls earns a tip. The HUD
 shows the clock, your money, the fare, the street you're on and a
-heading-up minimap.
+heading-up minimap with the route to the passenger or destination. The
+route follows real streets and respects one-way streets; take another turn
+and it shows the new way from there at once. The taxi tops out at 30 km/h
+(15 km/h in reverse), downhill too.
+
+**Big map.** Triangle opens a full-screen map of Vlora, north up: the sea,
+the roads, the taxi, the target and the route with its length. The game
+waits while it's open; Triangle again closes it.
 
 **Time of day.** The shift starts at 07:00 and a game minute passes every
 second: the light and the sky follow, with a dusk at about 19:30 and night
@@ -47,7 +57,8 @@ Every push builds the disc on GitHub: open the latest run of the
 **vlora-taxi-disc** from its Summary page, then go to
 **https://ps1-test.vercel.app**, click **Load disc or EXE** and pick that zip
 (or drop it on the page). On a keyboard: arrow keys steer, **R** is R2 (gas),
-**Tab** is L2 (brake), **S** is Square (handbrake). A gamepad works too.
+**Tab** is L2 (brake), **S** is Square (handbrake), **A** is Triangle (big
+map), **Q** / **E** are L1 / R1 (zoom). A gamepad works too.
 
 ## Plan
 
@@ -55,7 +66,8 @@ Every push builds the disc on GitHub: open the latest run of the
    64 m tiles, buildings you can't drive through, fog, 30 fps. **Done.**
 2. Day/night cycle and the whole Lungomare out to Uji i Ftohtë. **Done.**
 3. Fares: passengers, the meter, money, a minimap with the destination arrow,
-   street names on the HUD. **Done.**
+   street names on the HUD. **Done.** The route on the minimap, the big map
+   (Triangle), a 30 km/h top speed. **Done.**
 4. Fuel and a gas station, damage and the mechanic, saves on the memory card.
 5. Traffic: AI cars, traffic lights, rules and fines.
 6. Car radio and sound effects.
@@ -64,7 +76,7 @@ Every push builds the disc on GitHub: open the latest run of the
 
 `tools/osm2map.mjs` turns an OpenStreetMap export into `MAP.BIN`, which the
 build puts on the disc. The build uses `data/vlora.osm` (and starts the taxi
-at Sheshi i Flamurit); without it, the made-up `tools/test/testtown.osm`.
+on Bulevardi Ismail Qemali in front of Teatri Petro Marko); without it, the made-up `tools/test/testtown.osm`.
 `tools/fetch-vlora.sh` downloads `data/vlora.osm` again from the OpenStreetMap
 API (see [data/README.md](data/README.md)).
 
@@ -83,6 +95,10 @@ From the data the converter takes:
   stations (`amenity=fuel`) and mechanics (`shop=car_repair`) for later.
 - **Minimap and street names**: the drivable roads and their `name=`. Albanian
   letters become plain capitals for the PS1 font (ë → E, ç → C).
+- **Routes and the big map**: a graph of the drivable roads (junctions and
+  dead ends as nodes) with `oneway=yes/-1`, roundabouts and motorways as
+  one-way; service roads count double so routes prefer real streets. Plus a
+  32 m land/sea grid for the big map.
 
 - **Sea**: `natural=coastline` (land on its left); the ground is classified as
   land or sea, in 4 m strips near the shore, and the coast is a collision edge.
@@ -146,6 +162,10 @@ Generated files, committed so the build doesn't need to regenerate them:
   sliding along walls), chase camera, car drawing.
 - `src/game.c`: clock and day/night light, fares and the meter, passenger and
   destination markers, headlights, HUD, minimap, destination arrow.
+- `src/route.c`: the road graph (junctions, streets, one-way flags) and the
+  route: a shortest-path tree grown backwards from the target over a few
+  frames, then followed from wherever the taxi is.
+- `src/bigmap.c`: the full-screen map (Triangle).
 
 Two PS1 details worth knowing:
 
