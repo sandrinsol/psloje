@@ -7,10 +7,10 @@ and [docs/decisions.md](docs/decisions.md).
 
 **Status: Floor 1 prototype, in 3D.** The 9 x 9 floor of Sloth: carved rune
 slabs floating over a sea of ash, sunken statues in the haze, ash falling.
-The camera follows the soul from behind and above. Three waves of husks raise
+A fixed camera looks at the whole floor from the south, high and tilted. Three waves of husks raise
 their arms over their heads, and the runes of the slabs they're about to
-hit glow, then burn (your own slab flashes red). Move by dodging, turn with
-the D-pad, block, parry and riposte, drink flasks, die, rise again and fetch
+hit glow, then burn (your own slab flashes red). Walk with the D-pad, dodge with
+Circle; the soul always faces the nearest husk. Block, parry and riposte, drink flasks, die, rise again and fetch
 the absolution you dropped. Hit-stop, camera kicks, ash bursts and
 synthesised sound effects. When the floor is won its outer ring breaks away.
 60 fps. No boss, music or skills yet.
@@ -19,10 +19,10 @@ synthesised sound effects. When the floor is won its outer ring breaks away.
 
 | Button | Action | Keyboard (web player) |
 |---|---|---|
-| Left / Right | Turn a quarter (the camera swings round) | arrow keys |
-| Down | Turn around | down arrow |
-| Circle | Dodge one tile forward | Z |
-| Left / Right / Down + Circle | Dodge that way (relative to you), keep facing | arrow + Z |
+| D-pad | Walk a tile at a time (Up = away from the camera) | arrow keys |
+| Circle + direction | Dodge that way (invincible frames, stamina) | arrow + Z |
+| Circle | Dodge away from the enemy you face | Z |
+| (automatic) | Face the nearest enemy, along a row or column | |
 | X | Attack (sword: the tile in front) | X |
 | Square | Block; press just before a hit to parry | S |
 | Triangle | Drink a flask | A |
@@ -51,7 +51,7 @@ effects, synthesised and encoded as SPU ADPCM).
 - `src/game.c`: the rules: player (turning, dodges, sword, block and parry,
   stamina, flasks), husks (moving, telegraphed slam / line / cross attacks,
   stagger), waves, death and the absolution drop.
-- `src/draw.c`: the 3D scene: the following camera, the slabs (soul light,
+- `src/draw.c`: the 3D scene: the fixed camera, the slabs (soul light,
   telegraph glow, fog, the crumbling ring), statues, figures through the GTE,
   ash and bursts, the HUD.
 - `src/models.c`: the soul, the husk and the statues, built from boxes,

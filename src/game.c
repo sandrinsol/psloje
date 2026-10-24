@@ -9,6 +9,7 @@
 
 /* Player timing (frames) and costs. Stamina is kept x16 for slow refills. */
 #define STEP_FRAMES     9      /* a dodge: one tile */
+#define WALK_FRAMES     10     /* a walking step: one tile */
 #define IFRAME_FIRST    2      /* invincible frames 2..7 of the dodge */
 #define IFRAME_LAST     7
 #define DODGE_COST      (25 * 16)
@@ -114,7 +115,6 @@ void game_start_floor(int keep_drop) {
 	player.parry_t = 999;
 	player.hurt_t = 999;
 	player.parried_t = 999;
-	player.turned_dir = -1;
 	memset(enemies, 0, sizeof(enemies));
 	if (!keep_drop) {
 		drop_x = drop_y = -1;
@@ -146,7 +146,7 @@ static void spawn_wave(void) {
 
 /* The tile the player can be hit on: the dodge's destination from halfway. */
 static void player_tile(int *x, int *y) {
-	if (player.state == P_DODGE && player.t < STEP_FRAMES / 2) {
+	if ((player.state == P_DODGE && player.t < STEP_FRAMES / 2) || (player.state == P_WALK && player.t < WALK_FRAMES / 2)) {
 		*x = player.from_x;
 		*y = player.from_y;
 	} else {
@@ -240,6 +240,36 @@ static int try_dodge(int dir) {
 	return 1;
 }
 
+static int try_walk(int dir) {
+	int nx = player.x + DX[dir], ny = player.y + DY[dir];
+	if (!inside(nx, ny) || enemy_at(nx, ny) >= 0)
+		return 0;
+	player.from_x = player.x;
+	player.from_y = player.y;
+	player.x = nx;
+	player.y = ny;
+	player.state = P_WALK;
+	player.t = 0;
+	emit(EV_STEP, nx, ny);
+	return 1;
+}
+
+/* Face the nearest enemy, along a row or a column; exactly diagonal: as before. */
+static void face_nearest(void) {
+	int best = 1 << 30, bdx = 0, bdy = 0;
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		const Enemy *e = &enemies[i];
+		if (e->state == E_NONE || e->state == E_DYING) continue;
+		int dx = e->x - player.x, dy = e->y - player.y;
+		int d = dx * dx + dy * dy;
+		if (d < best) { best = d; bdx = dx; bdy = dy; }
+	}
+	if (best == 1 << 30) return;
+	int adx = bdx < 0 ? -bdx : bdx, ady = bdy < 0 ? -bdy : bdy;
+	if (adx > ady) player.facing = bdx > 0 ? DIR_RIGHT : DIR_LEFT;
+	else if (ady > adx) player.facing = bdy > 0 ? DIR_DOWN : DIR_UP;
+}
+
 static int try_attack(void) {
 	if (player.stamina <= 0)
 		return 0;
@@ -287,17 +317,15 @@ static void update_player(const Input *in) {
 	if (p->state == P_DEAD)
 		return;
 
-	/* The D-pad is relative to the soul: Up = ahead, Right, Down = behind, Left. */
-	int pressed_dir = dir_of(in->pressed), held_dir = dir_of(in->held);
-	static const uint16_t BIT[4] = { PAD_UP, PAD_RIGHT, PAD_DOWN, PAD_LEFT };
-	if (p->turned_dir >= 0 && !(in->held & BIT[p->turned_dir])) p->turned_dir = -1;   /* let go */
+	/* The D-pad walks (screen directions: Up = away from the camera). */
+	int held_dir = dir_of(in->held);
 	if (in->pressed & PAD_SQUARE) p->parry_t = 0;
 
 	/* Wanted this frame (or buffered while busy). */
 	if (in->pressed & PAD_CIRCLE) {
 		p->buffered = BUF_DODGE;
 		p->buffer_t = BUFFER_FRAMES;
-		p->buffer_dir = held_dir;   /* a direction held: dodge that way */
+		p->buffer_dir = held_dir;   /* a direction held: dodge that way, else away from the enemy */
 	}
 	if (in->pressed & PAD_CROSS) {
 		p->buffered = BUF_ATTACK;
@@ -307,6 +335,9 @@ static void update_player(const Input *in) {
 	switch (p->state) {
 	case P_DODGE:
 		if (p->t >= STEP_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
+		break;
+	case P_WALK:
+		if (p->t >= WALK_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
 		break;
 	case P_ATTACK:
 		if (p->t == ATTACK_WINDUP) sword_hits();
@@ -322,23 +353,9 @@ static void update_player(const Input *in) {
 	}
 
 	if (p->state == P_IDLE) {
-		/* Left / Right turn a quarter, Down turns around (no time). Remember
-		 * the facing before, so holding that direction and pressing Circle
-		 * dodges that way (relative to before) without turning. */
-		if (pressed_dir > 0) {
-			p->prev_facing = p->facing;
-			p->facing = (p->facing + pressed_dir) & 3;
-			p->turned_dir = pressed_dir;
-			emit(EV_TURN, p->x, p->y);
-		}
 		p->blocking = (in->held & PAD_SQUARE) != 0;
 		if (p->buffered == BUF_DODGE) {
-			int base = p->buffer_dir > 0 && p->buffer_dir == p->turned_dir ? p->prev_facing : p->facing;
-			int rel = p->buffer_dir > 0 ? p->buffer_dir : 0;
-			if (try_dodge((base + rel) & 3)) {
-				p->facing = base;
-				p->turned_dir = -1;
-			}
+			try_dodge(p->buffer_dir >= 0 ? p->buffer_dir : (p->facing + 2) & 3);
 			p->buffered = BUF_NONE;
 		} else if (p->buffered == BUF_ATTACK) {
 			try_attack();
@@ -347,11 +364,16 @@ static void update_player(const Input *in) {
 			p->flasks--;
 			p->state = P_DRINK;
 			p->t = 0;
+		} else if (held_dir >= 0 && !p->blocking) {
+			try_walk(held_dir);
 		}
 		if (p->state != P_IDLE) p->blocking = 0;
 	} else {
 		p->blocking = 0;
 	}
+
+	/* Always facing the nearest enemy, except mid-swing. */
+	if (p->state != P_ATTACK) face_nearest();
 
 	/* Stamina refills after a short pause, slowly while blocking. */
 	if (p->stamina_wait > 0) {
@@ -362,7 +384,7 @@ static void update_player(const Input *in) {
 	}
 
 	/* Absolution left here last time. */
-	if (drop_amount > 0 && p->state != P_DODGE && p->x == drop_x && p->y == drop_y) {
+	if (drop_amount > 0 && p->state != P_DODGE && p->state != P_WALK && p->x == drop_x && p->y == drop_y) {
 		absolution += drop_amount;
 		drop_amount = 0;
 		drop_x = drop_y = -1;

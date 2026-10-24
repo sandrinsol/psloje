@@ -25,17 +25,16 @@ extern const uint32_t glyphs_tim[], slabs_tim[];
 #define SLAB_DEPTH  56
 #define SCREEN_H    170         /* projection distance */
 #define NEAR_Z      96
-#define CAM_BACK    620         /* behind the soul */
-#define CAM_UP      900         /* above the floor */
-#define CAM_PITCH   560         /* looking down, 4096 = full turn (~49 degrees) */
-#define CAM_AHEAD   330         /* looks at a point this far ahead of the soul */
+#define CAM_PITCH   620         /* looking down, 4096 = full turn (~55 degrees) */
+#define CAM_DIST_PER_TILE 228   /* camera distance from the floor's middle, per tile of width */
+#define CAM_LOOK_Z  -90         /* looks a little this side of the middle */
 
 /* Floor 1, Sloth: ash, grey stone, a dull light. */
 static const Colour SKY_TOP = { 78, 72, 74 }, SKY_BOTTOM = { 10, 9, 13 }, FOG = { 58, 54, 57 };
-#define AMBIENT     70          /* /256 */
+#define AMBIENT     92          /* /256 */
 #define SOUL_LIGHT  210
-#define FOG_NEAR    1400
-#define FOG_FAR     5200
+#define FOG_NEAR    3400
+#define FOG_FAR     7600
 
 static uint16_t glyph_tpage, glyph_clut, slab_tpage, slab_clut[3];
 static uint8_t *prim, *prim_end;
@@ -43,7 +42,7 @@ static uint32_t *ot;
 
 /* Camera. */
 static MATRIX cam;
-static int32_t cam_x, cam_y, cam_z, cam_yaw = -1, kick_x, kick_z, zoom;
+static int32_t cam_x, cam_y, cam_z, kick_x, kick_z, zoom;
 static int32_t soul_x, soul_z;   /* world position of the soul (for its light) */
 
 void draw_init(void) {
@@ -152,21 +151,14 @@ static void tile_world(int tx16, int ty16, int *x, int *z) {
 	*z = (half - ty16) * TILE_U / 16;
 }
 
+/* The camera stays put: south of the floor, high, looking down at its
+ * middle, far enough back to see all of it. */
 static void update_camera(int frame) {
-	int want = player.facing * 1024;
-	if (cam_yaw < 0) cam_yaw = want;
-	cam_yaw = player.state == P_DEAD ? cam_yaw : ease_angle(cam_yaw, want, 4);
-	int s = isin(cam_yaw), c = icos(cam_yaw);
-	int tx = cam_yaw;
-	(void)tx;
-	/* Follow the soul (smoothly), look a little ahead of it. */
-	int back = CAM_BACK - zoom, up = CAM_UP - zoom;
-	int gx = soul_x - (s * back >> 12) + (s * CAM_AHEAD >> 12) + kick_x;
-	int gz = soul_z - (c * back >> 12) + (c * CAM_AHEAD >> 12) + kick_z;
-	if (frame == 0 || cam_y == 0) { cam_x = gx; cam_z = gz; }
-	cam_x += (gx - cam_x) / 3;
-	cam_z += (gz - cam_z) / 3;
-	cam_y = -up;
+	int sp = isin(CAM_PITCH), cp = icos(CAM_PITCH);
+	int dist = grid_n * CAM_DIST_PER_TILE - zoom;
+	cam_x = kick_x;
+	cam_y = -(dist * sp >> 12);
+	cam_z = CAM_LOOK_Z - (dist * cp >> 12) + kick_z;
 	if (shake_t > 0) {
 		cam_x += (frame & 1) ? shake_t * 2 : -shake_t * 2;
 		cam_y += (frame & 2) ? shake_t : -shake_t;
@@ -175,11 +167,10 @@ static void update_camera(int frame) {
 	kick_z = kick_z * 3 / 4;
 	zoom = zoom * 7 / 8;
 
-	int sp = isin(CAM_PITCH), cp = icos(CAM_PITCH);
-	/* Rows: camera right, down and forward, in world axes. */
-	cam.m[0][0] = c;                cam.m[0][1] = 0;  cam.m[0][2] = -s;
-	cam.m[1][0] = -(s * sp >> 12);  cam.m[1][1] = cp; cam.m[1][2] = -(c * sp >> 12);
-	cam.m[2][0] = s * cp >> 12;     cam.m[2][1] = sp; cam.m[2][2] = c * cp >> 12;
+	/* Rows: camera right, down and forward, in world axes (facing +z). */
+	cam.m[0][0] = 4096; cam.m[0][1] = 0;  cam.m[0][2] = 0;
+	cam.m[1][0] = 0;    cam.m[1][1] = cp; cam.m[1][2] = -sp;
+	cam.m[2][0] = 0;    cam.m[2][1] = sp; cam.m[2][2] = cp;
 	for (int r = 0; r < 3; r++)
 		cam.t[r] = -((cam.m[r][0] * cam_x + cam.m[r][1] * cam_y + cam.m[r][2] * cam_z) >> 12);
 	load_matrix(&cam);
@@ -342,7 +333,7 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 static int light_at(int x, int z) {
 	int dx = (x - soul_x) >> 4, dz = (z - soul_z) >> 4;   /* 1/16 tile */
 	int d2 = dx * dx + dz * dz;
-	const int R2 = 30 * 30;
+	const int R2 = 40 * 40;
 	return AMBIENT + SOUL_LIGHT * R2 / (R2 + d2);
 }
 
@@ -371,8 +362,9 @@ static int32_t fall_at[MAX_N][MAX_N];   /* floor_t when each slab starts to fall
 
 static void draw_floor(int frame) {
 	int n = grid_n, px, py;
-	px = player.state == P_DODGE && player.t < 4 ? player.from_x : player.x;
-	py = player.state == P_DODGE && player.t < 4 ? player.from_y : player.y;
+	int moving = (player.state == P_DODGE || player.state == P_WALK) && player.t < 5;
+	px = moving ? player.from_x : player.x;
+	py = moving ? player.from_y : player.y;
 	for (int y = 0; y < n; y++)
 		for (int x = 0; x < n; x++) tele[y][x] = game_telegraph(x, y);
 	for (int ty = 0; ty < n; ty++)
@@ -403,6 +395,14 @@ static void draw_floor(int frame) {
 			if (prim + 6 * sizeof(POLY_GT4) > prim_end) return;
 			/* Which sides face the camera (only those get their bottom corners). */
 			int see[4] = { cam_z > z1, cam_z < z0, cam_x > x1, cam_x < x0 };   /* N S E W */
+			/* Inner sides are thin strips from the fixed camera: only the
+			 * platform's outer edge shows its thickness (and falling slabs). */
+			if (!dy) {
+				if (ty != 0) see[0] = 0;
+				if (ty != n - 1) see[1] = 0;
+				if (tx != n - 1) see[2] = 0;
+				if (tx != 0) see[3] = 0;
+			}
 			if (see[0] || see[3]) project(x0, dy + SLAB_DEPTH, z1, &b[0]);
 			if (see[0] || see[2]) project(x1, dy + SLAB_DEPTH, z1, &b[1]);
 			if (see[1] || see[3]) project(x0, dy + SLAB_DEPTH, z0, &b[2]);
@@ -470,12 +470,11 @@ static void draw_floor(int frame) {
 /* ---- Statues in the haze ---------------------------------------------------------- */
 
 static void draw_statues(void) {
-	draw_model(&head_statue, 0, -2700, 650, 1900, 1400, 200, 0, 256);
-	draw_model(&hand_statue, 0, 2900, 700, 900, 3300, 200, 0, 256);
-	draw_model(&pillar_statue, 0, 1300, 600, 3300, 300, 200, 0, 256);
-	draw_model(&head_statue, 0, 2400, 900, -2600, 3000, 180, 0, 256);
-	draw_model(&pillar_statue, 0, -2300, 500, -1900, 0, 180, 0, 256);
-	draw_model(&hand_statue, 0, -600, 900, -3400, 1000, 180, 0, 256);
+	/* Around the floor and far behind it, half sunk in the ash. */
+	draw_model(&head_statue, 0, -3900, 1300, 4200, 1400, 200, 0, 256);
+	draw_model(&hand_statue, 0, 4000, 1100, 3600, 3300, 200, 0, 256);
+	draw_model(&pillar_statue, 0, 900, 1000, 6200, 300, 190, 0, 256);
+	draw_model(&pillar_statue, 0, -1800, 1100, 6800, 0, 180, 0, 256);
 }
 
 /* ---- Particles ----------------------------------------------------------------------- */
@@ -639,6 +638,10 @@ static void soul_pose(Pose *ps) {
 		else { ps->pitch[SOUL_SWORD_ARM] = lerp(-1500, 1300, p->t - 8, 3); ps->yaw[SOUL_SWORD_ARM] = lerp(-300, 300, p->t - 8, 4); ps->lean = lerp(-120, 220, p->t - 8, 3); }
 		if (p->t > 14) { ps->pitch[SOUL_SWORD_ARM] = lerp(1300, 380, p->t - 14, 8); ps->lean = lerp(220, 0, p->t - 14, 8); }
 		break;
+	case P_WALK:
+		ps->dy = -(isin(p->t * 2048 / 10) >> 9);   /* a small bob */
+		ps->pitch[SOUL_ARM] = 120 + (isin(p->t * 4096 / 10) >> 3);
+		break;
 	case P_DODGE:
 		ps->lean = 500; ps->dy = 30 - (p->t - 4) * (p->t - 4) * 2;
 		ps->pitch[SOUL_SWORD_ARM] = 900; ps->pitch[SOUL_ARM] = 900;
@@ -704,7 +707,7 @@ static void handle_events(void) {
 	static const int8_t DX[4] = { 0, 1, 0, -1 }, DY[4] = { -1, 0, 1, 0 };
 	for (int i = 0; i < num_events; i++) {
 		const GameEvent *e = &game_events[i];
-		int s = isin(cam_yaw), c = icos(cam_yaw);
+		int s = 0, c = 4096;   /* kicks go away from the camera */
 		switch (e->type) {
 		case EV_HIT:
 			burst(e->x, e->y, 10, 170, 160, 150, 10, 150);
@@ -747,9 +750,10 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame) {
 
 	/* Where the soul is (between tiles while dodging). */
 	int fx = player.x * 16, fy = player.y * 16;
-	if (player.state == P_DODGE) {
-		fx = player.from_x * 16 + (player.x - player.from_x) * 16 * player.t / 9;
-		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * player.t / 9;
+	if (player.state == P_DODGE || player.state == P_WALK) {
+		int n = player.state == P_WALK ? 10 : 9;
+		fx = player.from_x * 16 + (player.x - player.from_x) * 16 * player.t / n;
+		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * player.t / n;
 	}
 	tile_world(fx, fy, &soul_x, &soul_z);
 
