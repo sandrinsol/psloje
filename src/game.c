@@ -9,7 +9,6 @@
 
 /* Player timing (frames) and costs. Stamina is kept x16 for slow refills. */
 #define STEP_FRAMES     9      /* a dodge: one tile */
-#define WALK_FRAMES     10     /* a walking step: one tile */
 #define IFRAME_FIRST    2      /* invincible frames 2..7 of the dodge */
 #define IFRAME_LAST     7
 #define DODGE_COST      (25 * 16)

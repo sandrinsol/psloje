@@ -53,6 +53,9 @@ typedef struct {
 	int32_t hit_t;              /* frames since hit (flash) */
 } Enemy;
 
+/* A walking step, one tile (a dodge is 9 frames). */
+#define WALK_FRAMES   20
+
 #define HP_MAX        100
 #define STAMINA_MAX   100
 
@@ -64,8 +67,8 @@ extern volatile int32_t drop_x, drop_y, drop_amount;   /* absolution left on the
 extern int32_t message_t;
 extern const char *message;
 extern int32_t shake_t;
-extern int32_t hitstop_t;
-extern int32_t floor_t;     /* frames in the floor's current state */   /* frames the game stays frozen (hit-stop) */
+extern int32_t hitstop_t;   /* frames the game stays frozen (hit-stop) */
+extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_RIPOSTE, EV_KILL, EV_BLOCK, EV_PARRY, EV_HURT,

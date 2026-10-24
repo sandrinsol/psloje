@@ -21,7 +21,7 @@ What was decided on top of the [design brief](design-brief.md).
 ## Controls
 | Button | Action |
 |---|---|
-| D-pad | Walk one tile (10 frames, no stamina), screen directions |
+| D-pad | Walk one tile (20 frames, no stamina), screen directions |
 | Circle + direction | Dodge that way (9 frames, 6 invincible, 25 % stamina) |
 | Circle alone | Dodge away from the enemy you face |
 | (automatic) | Face the nearest enemy along a row or column; exactly diagonal: keep facing |

@@ -639,8 +639,8 @@ static void soul_pose(Pose *ps) {
 		if (p->t > 14) { ps->pitch[SOUL_SWORD_ARM] = lerp(1300, 380, p->t - 14, 8); ps->lean = lerp(220, 0, p->t - 14, 8); }
 		break;
 	case P_WALK:
-		ps->dy = -(isin(p->t * 2048 / 10) >> 9);   /* a small bob */
-		ps->pitch[SOUL_ARM] = 120 + (isin(p->t * 4096 / 10) >> 3);
+		ps->dy = -(isin(p->t * 2048 / WALK_FRAMES) >> 9);   /* a small bob */
+		ps->pitch[SOUL_ARM] = 120 + (isin(p->t * 4096 / WALK_FRAMES) >> 3);
 		break;
 	case P_DODGE:
 		ps->lean = 500; ps->dy = 30 - (p->t - 4) * (p->t - 4) * 2;
@@ -751,7 +751,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame) {
 	/* Where the soul is (between tiles while dodging). */
 	int fx = player.x * 16, fy = player.y * 16;
 	if (player.state == P_DODGE || player.state == P_WALK) {
-		int n = player.state == P_WALK ? 10 : 9;
+		int n = player.state == P_WALK ? WALK_FRAMES : 9;
 		fx = player.from_x * 16 + (player.x - player.from_x) * 16 * player.t / n;
 		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * player.t / n;
 	}
