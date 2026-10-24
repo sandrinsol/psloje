@@ -1,0 +1,9 @@
+{
+  "build": "cmake --preset default && cmake --build build",
+  "rom": "build/game.cue",
+  "symbols": "build/game.elf",
+  "bios": "openbios",
+  "watch": ["fps:s32", "floor_state:s32", "wave:s32", "enemies_alive:s32", "absolution:s32", "guilt:s32", "player:s32", "player+4:s32", "player+28:s32", "player+32:s32", "drop_amount:s32"],
+  "frameCounter": "frame_count",
+  "cpuUsage": "cpu_usage"
+}
