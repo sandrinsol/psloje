@@ -53,6 +53,17 @@ jobs:
           done
           exit $status
 
+      # The playable disc: download it from the run's Summary page, then load
+      # the zip at https://ps1-test.vercel.app (Load disc or EXE) or in any PS1
+      # emulator.
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: vlora-taxi-disc
+          path: |
+            build/game.cue
+            build/game.bin
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

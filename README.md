@@ -27,6 +27,15 @@ heading-up minimap.
 **Time of day.** The shift starts at 07:00 and a game minute passes every
 second: the light and the sky follow, with a dusk at about 19:30 and night
 from 20:30, when the headlights, tail lights and the TAXI sign glow.
+## Play it
+
+Every push builds the disc on GitHub: open the latest run of the
+[ps1-tests workflow](../../actions/workflows/ps1-tests.yml), download
+**vlora-taxi-disc** from its Summary page, then go to
+**https://ps1-test.vercel.app**, click **Load disc or EXE** and pick that zip
+(or drop it on the page). On a keyboard: arrow keys steer, **R** is R2 (gas),
+**Tab** is L2 (brake), **S** is Square (handbrake). A gamepad works too.
+
 ## Plan
 
 1. Drive around the centre: chase camera, the city streamed from the CD in
