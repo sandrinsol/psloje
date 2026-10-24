@@ -6,8 +6,9 @@ What was decided on top of the [design brief](design-brief.md).
 - Real PS1 homebrew: C and PSn00bSDK, tested with ps1-test, 60 fps.
 - Low-poly 3D, dark gothic: carved stone slabs with runes, robed figures,
   a sky gradient and set pieces per sin (Sloth: ash, sunken statues).
-- The camera follows the soul from behind, high and close, and swings round
-  when it turns; your own slab flashes red when it's about to be hit.
+- A fixed camera from the south, high and tilted, showing the whole floor
+  (it followed the soul at first: changed after playing); your own slab
+  flashes red when it's about to be hit.
 - Atmosphere: the soul carries a light, ash / embers fall, the outer ring of
   the floor breaks away when it's won.
 - Hit feel: hit-stop, camera kick, bursts, synthesised sound effects.
@@ -20,10 +21,10 @@ What was decided on top of the [design brief](design-brief.md).
 ## Controls
 | Button | Action |
 |---|---|
-| Left / Right | Turn a quarter (no time), relative to the soul |
-| Down | Turn around |
-| Circle | Dodge one tile forward: the only way to move (9 frames, 6 invincible, 25 % stamina) |
-| Left / Right / Down held + Circle | Dodge that way (relative) and keep your facing |
+| D-pad | Walk one tile (10 frames, no stamina), screen directions |
+| Circle + direction | Dodge that way (9 frames, 6 invincible, 25 % stamina) |
+| Circle alone | Dodge away from the enemy you face |
+| (automatic) | Face the nearest enemy along a row or column; exactly diagonal: keep facing |
 | X | Attack: windup, hit, recovery; stamina |
 | Square | Block (stamina per hit); pressed within 6 frames before a hit: parry, then a riposte does 3x damage |
 | Triangle | Drink a flask (takes time, you can be hit) |

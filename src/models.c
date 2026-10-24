@@ -110,7 +110,7 @@ void models_init(void) {
 	static const uint8_t dark[] = { 8, 6, 10 }, eyes[] = { 170, 200, 255 }, skin[] = { 120, 110, 104 };
 	static const uint8_t blade[] = { 200, 206, 214 }, hilt[] = { 130, 96, 52 };
 	Model *m = &soul_model;
-	scale = 6144;   /* x 1.5: big enough to read from the camera */
+	scale = 7373;   /* x 1.8: big enough to read from the camera */
 	begin(m, 0, 0, 0);
 	prism(6, 0, 0, 52, 28, 0, -112, robe, 0, 1);
 	prism(6, 0, 0, 28, 20, -112, -140, robe2, 1, 0);
@@ -132,7 +132,7 @@ void models_init(void) {
 	static const uint8_t ash[] = { 128, 122, 116 }, ash2[] = { 104, 98, 94 }, ash3[] = { 150, 144, 136 };
 	static const uint8_t ember[] = { 230, 170, 80 };
 	m = &husk_model;
-	scale = 5530;   /* x 1.35 */
+	scale = 6554;   /* x 1.6 */
 	begin(m, 0, -90, 0);
 	box(-46, -14, -92, 0, -22, 20, ash2);
 	box(14, 46, -92, 0, -22, 20, ash2);
