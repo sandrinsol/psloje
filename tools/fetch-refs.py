@@ -28,7 +28,7 @@ def get(url, **kw):
     for attempt in range(8):
         r = s.get(url, timeout=60, **kw)
         if r.status_code == 429 or r.status_code >= 500:
-            time.sleep(5 * (attempt + 1))
+            time.sleep(15 * (attempt + 1))
             continue
         return r
     return r

@@ -64,7 +64,8 @@ add_custom_command(
 	OUTPUT  map.bin map-report.json
 	COMMAND ${NODE} "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs" "${MAP_OSM}" map.bin
 	        --spawn "${MAP_SPAWN}" --name "${MAP_NAME}" --report map-report.json ${MAP_ARGS}
-	DEPENDS "${MAP_OSM}" ${MAP_DEPS} "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs"
+	DEPENDS "${MAP_OSM}" ${MAP_DEPS} "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs" "${PROJECT_SOURCE_DIR}/tools/landmarks.mjs"
+	        "${PROJECT_SOURCE_DIR}/tools/signs.mjs" "${PROJECT_SOURCE_DIR}/tools/maketex.mjs"
 	COMMENT "Converting ${MAP_OSM} to MAP.BIN"
 	VERBATIM
 )

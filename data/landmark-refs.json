@@ -1,0 +1,259 @@
+{
+ "note": "Wikimedia Commons photos looked at while modelling and painting the landmarks (tools/landmarks.mjs, tools/maketex.mjs). None of them is in the game.",
+ "landmarks": {
+  "independence-monument": [
+   {
+    "title": "File:Independence Monument in Flag Square, Vlorë, Albania.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Independence_Monument_in_Flag_Square,_Vlor%C3%AB,_Albania.jpg",
+    "author": "Marina Lamaj",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Sheshi Pavarësia Vlorë.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Sheshi_Pavar%C3%ABsia_Vlor%C3%AB.jpg",
+    "author": "Arianit",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Sheshi i flamurit (Vlore, Albania).jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Sheshi_i_flamurit_(Vlore,_Albania).jpg",
+    "author": "Vlorari",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:2001-Kienzle-Dia (35).jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:2001-Kienzle-Dia_(35).jpg",
+    "author": "Helmut Kienzle",
+    "licence": "CC BY 4.0"
+   },
+   {
+    "title": "File:Independence Monument in Flag Square, Vlorë, Albania.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Independence_Monument_in_Flag_Square,_Vlor%C3%AB,_Albania.jpg",
+    "author": "Marina Lamaj",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Independence Monument vlora 16.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Independence_Monument_vlora_16.jpg",
+    "author": "flickr: etrusko25",
+    "licence": "CC BY-SA 2.0"
+   },
+   {
+    "title": "File:Independence Monument, Vlorë.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Independence_Monument,_Vlor%C3%AB.jpg",
+    "author": "A.jobs02",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Monumenti i Pavaresisie.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Monumenti_i_Pavaresisie.jpg",
+    "author": "Arianit",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Monumenti i Pavarësisë.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Monumenti_i_Pavar%C3%ABsis%C3%AB.jpg",
+    "author": "Arianit",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Monumenti Pavaresia 2.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Monumenti_Pavaresia_2.jpg",
+    "author": "Arianit",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Monumenti Pavarësia 2.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Monumenti_Pavar%C3%ABsia_2.jpg",
+    "author": "Arianit",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Monumenti Pavarësia 3.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Monumenti_Pavar%C3%ABsia_3.jpg",
+    "author": "Arianit",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Monumento Indipendenza - lungomare Durazzo.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Monumento_Indipendenza_-_lungomare_Durazzo.jpg",
+    "author": "Micniosi",
+    "licence": "CC BY-SA 3.0"
+   },
+   {
+    "title": "File:Sheshi i flamurit (Vlore, Albania).jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Sheshi_i_flamurit_(Vlore,_Albania).jpg",
+    "author": "Vlorari",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Statue, Vlora, Albania.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Statue,_Vlora,_Albania.jpg",
+    "author": "Timuspics",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:The monument of Independence in Vlorë (Vlora).jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:The_monument_of_Independence_in_Vlor%C3%AB_(Vlora).jpg",
+    "author": "Constantine H.",
+    "licence": "CC BY 2.0"
+   },
+   {
+    "title": "File:Vlora Independence monument (detail).jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Vlora_Independence_monument_(detail).jpg",
+    "author": "No machine-readable author provided. Decius assumed (based on copyright claims).",
+    "licence": "CC BY-SA 3.0"
+   },
+   {
+    "title": "File:Vlora Independence monument.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Vlora_Independence_monument.jpg",
+    "author": "No machine-readable author provided. Decius assumed (based on copyright claims).",
+    "licence": "CC BY-SA 3.0"
+   },
+   {
+    "title": "File:Vlorë, Albania 31 December 2022 - Independence Monument.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Vlor%C3%AB,_Albania_31_December_2022_-_Independence_Monument.jpg",
+    "author": "Sharon Hahn Darlin",
+    "licence": "CC BY 2.0"
+   },
+   {
+    "title": "File:VlorëDenkmal.JPG",
+    "page": "https://commons.wikimedia.org/wiki/File:Vlor%C3%ABDenkmal.JPG",
+    "author": "Joergsam",
+    "licence": "CC BY-SA 3.0"
+   },
+   {
+    "title": "File:VlorëPartisanenDenkmal.JPG",
+    "page": "https://commons.wikimedia.org/wiki/File:Vlor%C3%ABPartisanenDenkmal.JPG",
+    "author": "Joergsam",
+    "licence": "CC BY-SA 3.0"
+   }
+  ],
+  "muradie-mosque": [
+   {
+    "title": "File:2011 Wlora, Meczet Murada 01.JPG",
+    "page": "https://commons.wikimedia.org/wiki/File:2011_Wlora,_Meczet_Murada_01.JPG",
+    "author": "Marcin Konsek",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:2011 Wlora, Meczet Murada 02.JPG",
+    "page": "https://commons.wikimedia.org/wiki/File:2011_Wlora,_Meczet_Murada_02.JPG",
+    "author": "Marcin Konsek",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:2011 Wlora, Meczet Murada 03.JPG",
+    "page": "https://commons.wikimedia.org/wiki/File:2011_Wlora,_Meczet_Murada_03.JPG",
+    "author": "Marcin Konsek",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Dmmc04.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Dmmc04.jpg",
+    "author": "Carel De Iongh",
+    "licence": "Public domain"
+   },
+   {
+    "title": "File:Dmmc05.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Dmmc05.jpg",
+    "author": "",
+    "licence": "Public domain"
+   },
+   {
+    "title": "File:Meczet we Vlorze.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Meczet_we_Vlorze.jpg",
+    "author": "Rm133",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Moschee Vlora.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Moschee_Vlora.jpg",
+    "author": "No machine-readable author provided. Decius assumed (based on copyright claims).",
+    "licence": "CC BY-SA 3.0"
+   },
+   {
+    "title": "File:Murachi Mosque, Vlora, Albania.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Murachi_Mosque,_Vlora,_Albania.jpg",
+    "author": "Timuspics",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Muradie Mosque Vlore - Exterior and Minaret.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Muradie_Mosque_Vlore_-_Exterior_and_Minaret.jpg",
+    "author": "Senada Kusi",
+    "licence": "CC BY-SA 4.0"
+   }
+  ],
+  "independence-museum": [
+   {
+    "title": "File:500 Albanian lek reverse.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:500_Albanian_lek_reverse.jpg",
+    "author": "http://www.worldpapermoney.org",
+    "licence": "Public domain"
+   },
+   {
+    "title": "File:Dmmc06.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Dmmc06.jpg",
+    "author": "Lodewijk Thomson",
+    "licence": "Public domain"
+   },
+   {
+    "title": "File:Entrance of the Museum of Independence in Vlora.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Entrance_of_the_Museum_of_Independence_in_Vlora.jpg",
+    "author": "Redon Skikuli",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Flamur i qendisur.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Flamur_i_qendisur.jpg",
+    "author": "Naturetraveler",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Godina Ku Ka Pasur Seline Qeveria Provizore E Ismail Qemalit 2.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Godina_Ku_Ka_Pasur_Seline_Qeveria_Provizore_E_Ismail_Qemalit_2.jpg",
+    "author": "Shpat Buzoku",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Godina Ku Ka Pasur Seline Qeveria Provizore E Ismail Qemalit.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Godina_Ku_Ka_Pasur_Seline_Qeveria_Provizore_E_Ismail_Qemalit.jpg",
+    "author": "Shpat Buzoku",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Independence Museum, Vlorë, Albania - 2016-07 01.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Independence_Museum,_Vlor%C3%AB,_Albania_-_2016-07_01.jpg",
+    "author": "Pasztilla aka Attila Terbócs",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Independence Museum, Vlorë, Albania - 2016-07 02.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Independence_Museum,_Vlor%C3%AB,_Albania_-_2016-07_02.jpg",
+    "author": "Pasztilla aka Attila Terbócs",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Independence Museum, Vlorë, Albania - 2016-07 03.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Independence_Museum,_Vlor%C3%AB,_Albania_-_2016-07_03.jpg",
+    "author": "Pasztilla aka Attila Terbócs",
+    "licence": "CC BY-SA 4.0"
+   }
+  ],
+  "teatri-petro-marko": [
+   {
+    "title": "File:Teatri Petro Marko Vlore.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Teatri_Petro_Marko_Vlore.jpg",
+    "author": "Arianit",
+    "licence": "CC BY-SA 4.0"
+   },
+   {
+    "title": "File:Vlorë, Albania 31 December 2022 - Teatri Petro Marko.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Vlor%C3%AB,_Albania_31_December_2022_-_Teatri_Petro_Marko.jpg",
+    "author": "Sharon Hahn Darlin",
+    "licence": "CC BY 2.0"
+   }
+  ]
+ }
+}

@@ -95,9 +95,10 @@ static const uint16_t *name_offsets;
 static const char *name_text;
 static int num_names;
 
-/* Textures: 3 texture pages of 16 (64 x 64, 8-bit) side by side from
- * (CITY_TPAGE_X, CITY_TPAGE_Y): the city's own (CITY.TIM, tools/maketex.mjs)
- * in the first two, the map's name signs (from MAP.BIN) in the third. */
+/* Textures: 3 texture pages of 16 (64 x 64) side by side from
+ * (CITY_TPAGE_X, CITY_TPAGE_Y): the city's own (CITY.TIM, tools/maketex.mjs,
+ * 8-bit) in the first two, the map's name signs (MAP.BIN's global section,
+ * 4-bit, 4 signs a slot) in the third. */
 #define SIGN_TEX 32
 static uint16_t tpages[3];
 static uint16_t clut, sign_clut;
@@ -135,8 +136,9 @@ int world_init(void) {
 	CdlFILE file;
 	TIM_IMAGE tim;
 
-	for (int i = 0; i < 3; i++)
-		tpages[i] = getTPage(1, 0, CITY_TPAGE_X + i * 128, CITY_TPAGE_Y);
+	tpages[0] = getTPage(1, 0, CITY_TPAGE_X, CITY_TPAGE_Y);
+	tpages[1] = getTPage(1, 0, CITY_TPAGE_X + 128, CITY_TPAGE_Y);
+	tpages[2] = getTPage(0, 0, CITY_TPAGE_X + 256, CITY_TPAGE_Y);   /* signs: 4-bit */
 	clut = getClut(CITY_CLUT_X, CITY_CLUT_Y);
 	sign_clut = getClut(CITY_CLUT_X, CITY_CLUT_Y + 1);
 
@@ -182,6 +184,17 @@ int world_init(void) {
 		p += num_places * sizeof(Place);
 		name_offsets = (const uint16_t *)p;
 		name_text = (const char *)(p + num_names * 2);
+		/* Name signs: a 16-colour CLUT and a 4-bit atlas, 4 signs a texture slot. */
+		int nsigns = g[2];
+		if (nsigns && g[3]) {
+			const uint16_t *s = (const uint16_t *)global_data + g[3] * 2;
+			num_sign_tex = (nsigns + 3) / 4;
+			RECT c = { CITY_CLUT_X, CITY_CLUT_Y + 1, 16, 1 };
+			RECT img = { CITY_TPAGE_X + 256, CITY_TPAGE_Y, 64, (num_sign_tex + 3) / 4 * 64 };
+			LoadImage(&c, (const uint32_t *)s);
+			LoadImage(&img, (const uint32_t *)(s + 16));
+			DrawSync(0);
+		}
 	}
 	/* The road graph (routes, the big map) follows them. */
 	if (header.graph_sectors && header.graph_sectors * SECTOR <= GRAPH_BYTES) {
