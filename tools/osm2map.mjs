@@ -15,6 +15,7 @@
 //                                  width=, lanes= or the road class
 //   park/grass/garden/pitch,       flat coloured ground areas
 //   water, beach, parking
+//   natural=coastline              the sea (ground on its right) and collision
 //   building outlines              collision edges (split into <= 32 m pieces)
 //
 // Coordinates: 1 game unit = 1/16 m. X = east, Z = north, Y = down (PS1 GTE
@@ -113,6 +114,10 @@ const mPerLon = 111412.84 * Math.cos(lat0 * Math.PI / 180);
 const toXZ = (id) => { const n = nodes.get(id); return n && [(n[1] - minLon) * mPerLon, (n[0] - minLat) * mPerLat]; };
 const widthM = (maxLon - minLon) * mPerLon, heightM = (maxLat - minLat) * mPerLat;
 const tilesX = Math.max(1, Math.ceil(widthM / TILE_M)), tilesZ = Math.max(1, Math.ceil(heightM / TILE_M));
+// The OSM API returns whole ways, reaching past the requested box: keep only
+// what lies inside it (with a margin for vertices of things that straddle it).
+const inside = (x, z, margin = 0) => x >= -margin && z >= -margin && x <= widthM + margin && z <= heightM + margin;
+const stats0 = { outside: 0 };
 
 // ---- Geometry collection, per tile ----------------------------------------
 
@@ -196,6 +201,7 @@ function building(poly, tags, id, isPart) {
   isPart ? stats.buildingParts++ : stats.buildings++;
 
   const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length, cz = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+  if (!inside(cx, cz) || poly.some(([x, z]) => !inside(x, z, 200))) { stats0.outside++; return; }
   const t = tileAt(cx, cz);
   const wallCol = parseColour(tags['building:colour'] || tags.colour);
   if (wallCol) stats.colouredBuildings++;
@@ -249,6 +255,7 @@ function flatArea(poly, layer, rgb) {
   stats.areas++;
   for (const [a, bb, c] of triangulate(poly)) {
     const cx = (poly[a][0] + poly[bb][0] + poly[c][0]) / 3, cz = (poly[a][1] + poly[bb][1] + poly[c][1]) / 3;
+    if (!inside(cx, cz) || [a, bb, c].some((i) => !inside(poly[i][0], poly[i][1], 300))) continue;
     const t = tileAt(cx, cz);
     addFace(t, true, { v: [vert(t, poly[a][0], 0, poly[a][1]), vert(t, poly[c][0], 0, poly[c][1]), vert(t, poly[bb][0], 0, poly[bb][1]), 0xffff], uv: [0, 0, 0, 0], tex: TEX.none, layer, rgb });
   }
@@ -277,6 +284,7 @@ function road(pts, tags) {
     for (let k = 0; k < n; k++) {
       const a = k / n, bb = (k + 1) / n;
       const ax = x0 + (x1 - x0) * a, az = z0 + (z1 - z0) * a, bx = x0 + (x1 - x0) * bb, bz = z0 + (z1 - z0) * bb;
+      if (!inside((ax + bx) / 2, (az + bz) / 2)) continue;
       const t = tileAt((ax + bx) / 2, (az + bz) / 2);
       const vSpan = Math.min(63, Math.round(len / n / ROAD_PIECE * 63));
       // Seen from above, travelling along the road: far-left, far-right, near-left, near-right.
@@ -288,6 +296,7 @@ function road(pts, tags) {
 }
 
 function joint([x, z], r, layer, tex) {
+  if (!inside(x, z)) return;
   const t = tileAt(x, z);
   const p = Array.from({ length: 8 }, (_, k) => [x + r * Math.cos(k * Math.PI / 4), z + r * Math.sin(k * Math.PI / 4)]);
   const v = p.map(([px, pz]) => vert(t, px, 0, pz));
@@ -333,13 +342,89 @@ for (const r of relations) {
   }
 }
 
-// Ground: a grid of textured quads under everything.
+// Coastline (natural=coastline): OSM draws it with the land on the left. Split
+// into <= 32 m pieces, bucketed in 64 m cells for the land/sea test, and used
+// as collision edges so the taxi stays out of the sea.
+const coast = [], coastGrid = new Map();
+const COAST_CELL = 64;
+for (const w of ways.values()) {
+  if (w.tags.natural !== 'coastline') continue;
+  const pts = wayPts(w);
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
+    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / EDGE_PIECE));
+    for (let k = 0; k < n; k++) {
+      const sg = [x0 + (x1 - x0) * k / n, z0 + (z1 - z0) * k / n, x0 + (x1 - x0) * (k + 1) / n, z0 + (z1 - z0) * (k + 1) / n];
+      const id = coast.push(sg) - 1;
+      for (let cz = Math.floor(Math.min(sg[1], sg[3]) / COAST_CELL); cz <= Math.floor(Math.max(sg[1], sg[3]) / COAST_CELL); cz++)
+        for (let cx = Math.floor(Math.min(sg[0], sg[2]) / COAST_CELL); cx <= Math.floor(Math.max(sg[0], sg[2]) / COAST_CELL); cx++) {
+          const key = cx + ',' + cz;
+          if (!coastGrid.has(key)) coastGrid.set(key, []);
+          coastGrid.get(key).push(id);
+        }
+      const mx = (sg[0] + sg[2]) / 2, mz = (sg[1] + sg[3]) / 2;
+      if (inside(mx, mz)) {
+        const et = tileAt(mx, mz);
+        et.edges.push(sg.map((v, j) => Math.round((v - (j % 2 ? et.tz : et.tx) * TILE_M) * UNIT)));
+      }
+    }
+  }
+}
+stats.coastKm = coast.reduce((s, c) => s + Math.hypot(c[2] - c[0], c[3] - c[1]), 0) / 1000;
+
+// Distance to the coast and which side: { d (metres), sea }.
+function coastAt(x, z) {
+  if (!coast.length) return { d: Infinity, sea: false };
+  const gx = Math.floor(x / COAST_CELL), gz = Math.floor(z / COAST_CELL);
+  let best = null;
+  for (let r = 0; r < 60; r++) {
+    if (best && (r - 1) * COAST_CELL > best.d) break;
+    for (let cz = gz - r; cz <= gz + r; cz++) for (let cx = gx - r; cx <= gx + r; cx++) {
+      if (Math.max(Math.abs(cx - gx), Math.abs(cz - gz)) !== r) continue;
+      for (const id of coastGrid.get(cx + ',' + cz) || []) {
+        const [x0, z0, x1, z1] = coast[id];
+        const dx = x1 - x0, dz = z1 - z0, l2 = dx * dx + dz * dz || 1e-9;
+        const u = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / l2));
+        const d = Math.hypot(x0 + dx * u - x, z0 + dz * u - z);
+        const cross = (dx * (z - z0) - dz * (x - x0)) / Math.sqrt(l2);   // > 0: left = land
+        // At a shared end point several pieces are equally close: trust the one
+        // the point is most squarely beside.
+        if (!best || d < best.d - 1e-6 || (Math.abs(d - best.d) <= 1e-6 && Math.abs(cross) > Math.abs(best.cross))) best = { d, cross };
+      }
+    }
+  }
+  return best ? { d: best.d, sea: best.cross < 0 } : { d: Infinity, sea: false };
+}
+
+// Ground: a grid of quads under everything: textured land, flat-coloured sea.
+// Cells near the coast are classified in 4 m strips so the shore follows it.
+const SEA = [46, 88, 128];
+function groundQuad(t, x0, z0, w, h, sea) {
+  addFace(t, true, {
+    v: [vert(t, x0, 0, z0 + h), vert(t, x0 + w, 0, z0 + h), vert(t, x0, 0, z0), vert(t, x0 + w, 0, z0)],
+    uv: sea ? [0, 0, 0, 0] : [0, 0, Math.round(w / GROUND_CELL * 63), Math.round(h / GROUND_CELL * 63)],
+    tex: sea ? TEX.none : TEX.ground, layer: LAYER.ground, rgb: sea ? SEA : [128, 128, 128],
+  });
+}
+let seaCells = 0;
 for (const t of tiles) {
   for (let gz = 0; gz < TILE_M; gz += GROUND_CELL) for (let gx = 0; gx < TILE_M; gx += GROUND_CELL) {
     const x0 = t.tx * TILE_M + gx, z0 = t.tz * TILE_M + gz;
-    addFace(t, true, { v: [vert(t, x0, 0, z0 + GROUND_CELL), vert(t, x0 + GROUND_CELL, 0, z0 + GROUND_CELL), vert(t, x0, 0, z0), vert(t, x0 + GROUND_CELL, 0, z0)], uv: [0, 0, 63, 63], tex: TEX.ground, layer: LAYER.ground, rgb: [128, 128, 128] });
+    const c = coastAt(x0 + GROUND_CELL / 2, z0 + GROUND_CELL / 2);
+    if (c.d > GROUND_CELL * 0.75) { groundQuad(t, x0, z0, GROUND_CELL, GROUND_CELL, c.sea); seaCells += c.sea; continue; }
+    const S = 4;
+    for (let sz = 0; sz < GROUND_CELL; sz += S) {
+      let run = 0, runSea = null;
+      for (let sx = 0; sx <= GROUND_CELL; sx += S) {
+        const sea = sx < GROUND_CELL ? coastAt(x0 + sx + S / 2, z0 + sz + S / 2).sea : null;
+        if (sea !== runSea && runSea !== null) { groundQuad(t, x0 + sx - run, z0 + sz, run, S, runSea); run = 0; }
+        runSea = sea;
+        run += S;
+      }
+    }
   }
 }
+stats.seaCells = seaCells;
 
 // ---- Spawn point -------------------------------------------------------------
 
@@ -361,7 +446,8 @@ for (const w of ways.values()) {
   const k = w.tags.highway && w.tags.highway.replace(/_link$/, '');
   if (!k || FOOT.has(k) || !ROAD_WIDTH[k] || w.tags.area === 'yes') continue;
   const pts = wayPts(w);
-  for (let i = 0; i + 1 < pts.length; i++) drivable.push({ a: pts[i], b: pts[i + 1], name: w.tags.name || '', kind: k });
+  for (let i = 0; i + 1 < pts.length; i++)
+    if (inside((pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2)) drivable.push({ a: pts[i], b: pts[i + 1], name: w.tags.name || '', kind: k });
 }
 function nearestRoad([x, z]) {
   let best = null;
@@ -400,7 +486,7 @@ const places = [], seenPlace = new Set();
 function addPlace(tags, pt) {
   const isPlace = tags.name && (PLACE_KEYS.some((k) => tags[k]) || (tags.building && tags.building !== 'yes'));
   const kind = placeKind(tags);
-  if (!pt || (!isPlace && !kind)) return;
+  if (!pt || (!isPlace && !kind) || !inside(pt[0], pt[1])) return;
   const road = nearestRoad(pt);
   if (!road || road.d > 60) return;            // too far from a street to drive to
   const label = tags.name || (kind === 1 ? 'Fuel' : 'Mechanic');
@@ -446,7 +532,7 @@ function globalBlob() {
   return buf;
 }
 const global = globalBlob();
-const MAX_GLOBAL_BYTES = 96 * 1024;  // must match GLOBAL_BYTES in src/world.c
+const MAX_GLOBAL_BYTES = 160 * 1024;  // must match GLOBAL_BYTES in src/world.c
 if (global.length > MAX_GLOBAL_BYTES) throw new Error(`places/roads/names take ${global.length} bytes (max ${MAX_GLOBAL_BYTES})`);
 
 // ---- Write ----------------------------------------------------------------------
@@ -516,6 +602,7 @@ const report = {
   largestTile: { at: worst, bytes: maxBytes, maxVerts }, fileBytes: out.length,
   places: places.length, fuelStations: places.filter((p) => p.kind === 1).length, mechanics: places.filter((p) => p.kind === 2).length,
   minimapSegments: segs.length, globalBytes: global.length,
+  coastKm: +stats.coastKm.toFixed(2), seaGroundCells: stats.seaCells, featuresOutsideBox: stats0.outside,
 };
 if (reportPath) writeFileSync(reportPath, JSON.stringify({ ...report, streetNameList: [...stats.names].sort(), placeList: places.map((p) => names[p.name]) }, null, 2));
 console.log(`osm2map: ${report.buildings} buildings (${report.buildingsWithDefaultHeight} with a guessed height), ${report.roads} roads (${report.roadKm} km), ${report.areas} areas, ${report.places} places (${report.fuelStations} fuel, ${report.mechanics} mechanics), ${tilesX}x${tilesZ} tiles, largest tile ${maxBytes} bytes, ${out.length} bytes total`);
