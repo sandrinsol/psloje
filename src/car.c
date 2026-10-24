@@ -1,8 +1,8 @@
 /*
  * Driving physics and the chase camera.
  *
- * Semi-arcade, tuned like an old W124 taxi: ~0-100 km/h in 9 s, about
- * 125 km/h flat out, firm brakes, the rear steps out a little at speed and
+ * Semi-arcade, tuned like an old diesel W124 taxi: the pedal goes down over
+ * about a second, ~0-50 km/h in 8 s, about 110 km/h flat out, firm brakes, the rear steps out a little at speed and
  * more with the handbrake. Steering follows the turning circle at low speed
  * and is limited by grip (about 0.8 g) at high speed.
  */
@@ -13,8 +13,8 @@
 #include "car.h"
 #include "car_model.h"
 
-#define ACCEL        53        /* at standstill, per tick (~3.1 m/s^2) */
-#define TOP_SPEED    37000     /* ~133 km/h, where the engine gives no more */
+#define ACCEL        32        /* at standstill, full pedal, per tick (~1.9 m/s^2) */
+#define TOP_SPEED    31000     /* ~112 km/h, where the engine gives no more */
 #define BRAKE        150       /* ~8.8 m/s^2 */
 #define REVERSE_MAX  4600      /* ~16 km/h */
 #define MIN_TURN_R   88        /* turning radius in 1/16 m (5.5 m) */
@@ -27,6 +27,7 @@ void car_reset(Car *car, int32_t world_x, int32_t world_z, int heading) {
 	car->vx = car->vz = 0;
 	car->heading = heading << 8;
 	car->steer = 0;
+	car->throttle = 0;
 	car->speed = 0;
 	car->bumps = 0;
 	car->y = world_ground_y(world_x, world_z);
@@ -86,9 +87,12 @@ void car_tick(Car *car, const CarInput *in) {
 	int32_t vlong = (car->vx * fx + car->vz * fz) >> 12;
 	int32_t vlat = (car->vx * rx + car->vz * rz) >> 12;
 
+	/* The pedal: down over ~1 s (a button is all or nothing), up in ~0.2 s. */
+	if (in->gas) car->throttle = car->throttle + 68 > 4096 ? 4096 : car->throttle + 68;
+	else car->throttle = car->throttle - 340 < 0 ? 0 : car->throttle - 340;
 	if (in->gas) {
 		if (vlong < -200) vlong += BRAKE;   /* gas while rolling back = brake */
-		else vlong += ACCEL * (TOP_SPEED - vlong) / TOP_SPEED;
+		else vlong += (ACCEL * car->throttle >> 12) * (TOP_SPEED - vlong) / TOP_SPEED;
 	}
 	if (in->brake) {
 		if (vlong > 200) vlong -= BRAKE;

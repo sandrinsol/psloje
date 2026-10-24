@@ -17,6 +17,7 @@ typedef struct {
 	int32_t bumps;       /* wall hits, for damage later */
 	int32_t y;           /* ground height, world units (negative = up) */
 	int32_t pitch;       /* nose up, 4096 per turn */
+	int32_t throttle;    /* 0 .. 4096: the pedal, pressed gradually */
 } Car;
 
 typedef struct {

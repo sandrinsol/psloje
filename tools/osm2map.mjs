@@ -259,7 +259,7 @@ function building(poly, tags, id, isPart) {
     const base = wallCol ? wallCol.map((c) => c / 255 * 160) : [128, 128, 128];
     const rgb = base.map((c) => clampByte(c * light));
     const cols = Math.max(1, Math.round(len / PANEL_W));
-    group.coarse.push({ v: [vert(t, x1, ground + h, z1), vert(t, x0, ground + h, z0), vert(t, x1, ground + minH, z1), vert(t, x0, ground + minH, z0)], uv: [0, 0, 63, 63], tex: wallTex, layer: 0, rgb });
+    group.coarse.push({ v: [vert(t, x0, ground + h, z0), vert(t, x1, ground + h, z1), vert(t, x0, ground + minH, z0), vert(t, x1, ground + minH, z1)], uv: [0, 0, 63, 63], tex: wallTex, layer: 0, rgb });
     for (let c = 0; c < cols; c++) {
       const a = c / cols, bb = (c + 1) / cols;
       const ax = x0 + (x1 - x0) * a, az = z0 + (z1 - z0) * a, bx = x0 + (x1 - x0) * bb, bz = z0 + (z1 - z0) * bb;
@@ -267,8 +267,9 @@ function building(poly, tags, id, isPart) {
       for (let r = 0; r < rows; r++) {
         const y0 = minH + (h - minH) * r / rows, y1 = minH + (h - minH) * (r + 1) / rows;
         const vSpan = Math.min(63, Math.round((y1 - y0) / (FLOOR_H * PANEL_FLOORS) * 63));
-        // Viewed from outside the outline (to its right), "left" is the b end.
-        group.fine.push({ v: [vert(t, bx, ground + y1, bz), vert(t, ax, ground + y1, az), vert(t, bx, ground + y0, bz), vert(t, ax, ground + y0, az)], uv: [0, 63 - vSpan, uSpan, 63], tex: wallTex, layer: 0, rgb });
+        // Seen from outside (to the right of a counter-clockwise outline), the
+        // a end is on the left: TL, TR, BL, BR = a top, b top, a bottom, b bottom.
+        group.fine.push({ v: [vert(t, ax, ground + y1, az), vert(t, bx, ground + y1, bz), vert(t, ax, ground + y0, az), vert(t, bx, ground + y0, bz)], uv: [0, 63 - vSpan, uSpan, 63], tex: wallTex, layer: 0, rgb });
       }
     }
     // Collision only for walls that reach the street.
