@@ -17,6 +17,7 @@
 #include <psxgte.h>
 #include <inline_c.h>
 #include "game.h"
+#include "route.h"
 
 #define START_FARE      300      /* Lek */
 #define PER_KM          120      /* Lek per km */
@@ -198,6 +199,21 @@ void game_update(const Car *car, int ticks) {
 	last_x = x;
 	last_z = z;
 	update_light();
+
+	/* The route follows the target. */
+	static const Place *routed;
+	int pickup;
+	const Place *target = game_target(&pickup);
+	if (target != routed) {
+		routed = target;
+		if (target) route_set_target(target->x, target->z);
+		else route_clear();
+	}
+}
+
+const Place *game_target(int *pickup) {
+	*pickup = fare_state == FARE_PICKUP;
+	return fare_state == FARE_PICKUP ? &places[fare_from] : fare_state == FARE_RIDE ? &places[fare_to] : 0;
 }
 
 /* ---- World markers ------------------------------------------------------------- */
@@ -412,6 +428,34 @@ static uint8_t *triangle(uint32_t *ot, uint8_t *prim, int x0, int y0, int x1, in
 	return prim + sizeof(POLY_F3);
 }
 
+/* The route to the target, 2 pixels wide, in the target's colour. */
+static uint8_t *map_route(const MapArg *a, uint8_t *prim) {
+	const int reach = MAP_SIZE * MAP_SCALE;   /* metres: beyond the corners */
+	int r = fare_state == FARE_PICKUP ? 60 : 255, g = fare_state == FARE_PICKUP ? 230 : 150, b = fare_state == FARE_PICKUP ? 90 : 30;
+	for (int i = 0; i + 1 < route_count; i++) {
+		const MapPoint *p = &route_points[i], *q = &route_points[i + 1];
+		int32_t dx0 = p->x - a->cx, dz0 = p->z - a->cz, dx1 = q->x - a->cx, dz1 = q->z - a->cz;
+		if ((dx0 > reach && dx1 > reach) || (dx0 < -reach && dx1 < -reach) ||
+		    (dz0 > reach && dz1 > reach) || (dz0 < -reach && dz1 < -reach))
+			continue;
+		int32_t x0, y0, x1, y1;
+		map_point(a, p->x, p->z, &x0, &y0);
+		map_point(a, q->x, q->z, &x1, &y1);
+		if (!clip(&x0, &y0, &x1, &y1))
+			continue;
+		for (int k = 0; k < 2; k++) {
+			LINE_F2 *l = (LINE_F2 *)prim;
+			setLineF2(l);
+			if (x1 - x0 > y1 - y0 || x0 - x1 > y1 - y0) setXY2(l, x0, y0 + k, x1, y1 + k);
+			else setXY2(l, x0 + k, y0, x1 + k, y1);
+			setRGB0(l, r, g, b);
+			addPrim(a->ot, l);
+			prim += sizeof(LINE_F2);
+		}
+	}
+	return prim;
+}
+
 static uint8_t *minimap(const Car *car, const Camera *cam, uint32_t *ot, uint8_t *prim, const Place *target) {
 	MapArg a = { ot, prim, CAR_TO_WORLD(car->x) / UNIT, CAR_TO_WORLD(car->z) / UNIT, isin(cam->heading), icos(cam->heading) };
 	int mx = MAP_X + MAP_SIZE / 2, my = MAP_Y + MAP_SIZE / 2;
@@ -436,6 +480,8 @@ static uint8_t *minimap(const Car *car, const Camera *cam, uint32_t *ot, uint8_t
 		addPrim(ot, t);
 		a.prim += sizeof(TILE);
 	}
+	if (target)
+		a.prim = map_route(&a, a.prim);
 	static int frame;
 	if (!(frame++ & 1)) {
 		num_map_lines = 0;

@@ -3,7 +3,7 @@
 // Export button or the Overpass API) into MAP.BIN, the city the game streams
 // from the CD.
 //
-//   node tools/osm2map.mjs <map.osm> <out.bin> [--spawn "<name>"] [--name LABEL] [--report out.json]
+//   node tools/osm2map.mjs <map.osm> <out.bin> [--spawn "<name>" [--spawn-road "<street>"]] [--name LABEL] [--report out.json]
 //
 // What becomes what:
 //   building=* / building:part=*   walls (textured, split into 8 m x 2-floor
@@ -27,8 +27,8 @@
 // tile's vertices are relative to its south-west corner so they fit in 16 bits.
 //
 // MAP.BIN layout (little-endian, every tile starts on a 2048-byte sector):
-//   header  'VMAP' u16 version (3), u16 tilesX, u16 tilesZ, u16 tileUnits,
-//           u16 headerSectors, u16 0, i32 spawnX, i32 spawnZ,
+//   header  'VMAP' u16 version (4), u16 tilesX, u16 tilesZ, u16 tileUnits,
+//           u16 headerSectors, u16 graphSectors, i32 spawnX, i32 spawnZ,
 //           i16 spawnHeading (4096 = full turn, 0 = north, clockwise),
 //           u16 globalSectors, char name[32], u32 globalSector,
 //           then per tile: u32 first sector << 10 | far sectors << 5 | near sectors
@@ -53,6 +53,8 @@
 //   The first nflat faces lie on the ground (drawn first, by layer); the rest
 //   are depth-sorted.
 //   global  places and names (see "Places" below)
+//   graph   the road graph and sea bitmap (see "Road graph" below), right
+//           after the global section
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -85,6 +87,7 @@ const LAYER = { ground: 0, area: 1, foot: 2, road: 3 };
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
 const spawnName = opt('--spawn');
+const spawnRoad = opt('--spawn-road');   // start on this street (the one the place faces)
 const reportPath = opt('--report');
 const mapLabel = opt('--name') || 'OSM MAP';
 const extraPaths = (opt('--extra') || '').split(',').filter(Boolean);
@@ -596,9 +599,9 @@ for (const w of ways.values()) {
   for (let i = 0; i + 1 < pts.length; i++)
     if (inside((pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2)) drivable.push({ a: pts[i], b: pts[i + 1], name: w.tags.name || '', kind: k });
 }
-function nearestRoad([x, z]) {
+function nearestRoad([x, z], among = drivable) {
   let best = null;
-  for (const { a: [x0, z0], b: [x1, z1] } of drivable) {
+  for (const { a: [x0, z0], b: [x1, z1] } of among) {
     const dx = x1 - x0, dz = z1 - z0, l2 = dx * dx + dz * dz || 1;
     const u = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / l2));
     const px = x0 + dx * u, pz = z0 + dz * u, d = Math.hypot(px - x, pz - z);
@@ -606,9 +609,13 @@ function nearestRoad([x, z]) {
   }
   return best;
 }
-// Move the spawn to the nearest road point so the taxi starts on a street.
+// Move the spawn to the nearest road point so the taxi starts on a street
+// (on --spawn-road if given and found).
 {
-  const best = nearestRoad(spawn);
+  const want = spawnRoad && spawnRoad.toLowerCase();
+  const named = want ? drivable.filter((d) => d.name.toLowerCase() === want) : [];
+  if (want && !named.length) console.warn(`spawn road "${spawnRoad}" not found; using the nearest road`);
+  const best = nearestRoad(spawn, named.length ? named : drivable);
   if (best) { spawn = best.p; spawn.heading = best.heading; }
 }
 
@@ -662,6 +669,134 @@ for (const { a: [x0, z0], b: [x1, z1], name, kind } of drivable) {
 }
 if (places.length > 4000 || names.length > 8000) throw new Error('too many places or names');
 
+// ---- Road graph and the big map ----------------------------------------------------
+//
+// For the route to the passenger / destination (shortest path on the PS1,
+// respecting one-way streets) and the full-screen map (Triangle). A separate
+// section right after the global one, read into RAM once:
+//   u16 nnodes, nedges, gridW, gridH, cellM, seaW, seaH, seaCell,
+//   u32 npoints, nadj, ncellEntries, 0
+//   nodes   nnodes x { i16 x, z (metres) }          junctions and dead ends
+//   adj     nnodes + 1 x u32 first (into the list), then nadj x u16 edge
+//   edges   nedges x { u16 a, b, length (m), u8 npoints, u8 flags, u32 firstPoint }
+//           flags: bits 0-1 class (0 minor, 1 secondary/tertiary, 2 primary+),
+//           4 = one-way (only a -> b), 8 = service road (routes avoid it)
+//   points  npoints x { i16 x, z }: each edge's shape between a and b
+//   grid    gridW x gridH cells of cellM metres (row = z): ncells + 1 x u32
+//           first, then ncellEntries x u16 edge (the edges crossing each cell)
+//   sea     seaH rows of ceil(seaW / 8) bytes, a bit per seaCell-metre cell
+//           (1 = sea, bit 0 = west), for the big map
+const GRID_M = 128, SEA_CELL = 32;
+const gNodes = [], gNodeId = new Map(), gEdges = [], gPoints = [];
+{
+  const ONEWAY = (t) => {
+    if (t.oneway === '-1' || t.oneway === 'reverse') return -1;
+    if (['yes', 'true', '1'].includes(t.oneway)) return 1;
+    if (t.oneway === 'no') return 0;
+    return ['roundabout', 'circular'].includes(t.junction) || t.highway === 'motorway' ? 1 : 0;
+  };
+  // Runs of each drivable way inside the box, and how often each node is used.
+  const runs = [], uses = new Map();
+  for (const w of ways.values()) {
+    const k = w.tags.highway && w.tags.highway.replace(/_link$/, '');
+    if (!k || FOOT.has(k) || !ROAD_WIDTH[k] || w.tags.area === 'yes') continue;
+    const refs = w.refs.filter((r) => nodes.has(r));
+    let run = [];
+    const flush = () => { if (run.length > 1) runs.push({ refs: run, tags: w.tags, kind: k }); run = []; };
+    for (let i = 0; i + 1 < refs.length; i++) {
+      const a = toXZ(refs[i]), b = toXZ(refs[i + 1]);
+      if (inside((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) { if (!run.length) run.push(refs[i]); run.push(refs[i + 1]); }
+      else flush();
+    }
+    flush();
+  }
+  for (const r of runs) r.refs.forEach((id, i) => uses.set(id, (uses.get(id) || 0) + (i === 0 || i === r.refs.length - 1 ? 2 : 1)));
+  const nodeIndex = (id) => {
+    if (!gNodeId.has(id)) { const [x, z] = toXZ(id); gNodeId.set(id, gNodes.length); gNodes.push([Math.round(x), Math.round(z)]); }
+    return gNodeId.get(id);
+  };
+  // Douglas-Peucker: the shape to ~1.5 m.
+  const simplify = (pts) => {
+    if (pts.length < 3) return pts;
+    const [x0, z0] = pts[0], [x1, z1] = pts[pts.length - 1];
+    const dx = x1 - x0, dz = z1 - z0, l = Math.hypot(dx, dz) || 1e-9;
+    let worst = 0, at = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = Math.abs((pts[i][0] - x0) * dz - (pts[i][1] - z0) * dx) / l;
+      if (d > worst) { worst = d; at = i; }
+    }
+    if (worst < 1.5) return [pts[0], pts[pts.length - 1]];
+    return [...simplify(pts.slice(0, at + 1)).slice(0, -1), ...simplify(pts.slice(at))];
+  };
+  for (const r of runs) {
+    const dir = ONEWAY(r.tags);
+    const cls = ['motorway', 'trunk', 'primary'].includes(r.kind) ? 2 : ['secondary', 'tertiary'].includes(r.kind) ? 1 : 0;
+    const flags = cls | (dir ? 4 : 0) | (['service', 'track'].includes(r.kind) ? 8 : 0);
+    let start = 0;
+    for (let i = 1; i < r.refs.length; i++) {
+      if (i < r.refs.length - 1 && uses.get(r.refs[i]) < 2) continue;
+      let ids = r.refs.slice(start, i + 1);
+      if (dir < 0) ids = ids.reverse();
+      start = i;
+      const pts = ids.map(toXZ);
+      let len = 0;
+      for (let j = 0; j + 1 < pts.length; j++) len += Math.hypot(pts[j + 1][0] - pts[j][0], pts[j + 1][1] - pts[j][1]);
+      const a = nodeIndex(ids[0]), b = nodeIndex(ids[ids.length - 1]);
+      if (a === b && len < 1) continue;
+      let shape = simplify(pts).slice(1, -1).map((p) => p.map(Math.round));
+      // Long edges in pieces of <= 255 shape points (never happens in practice).
+      if (shape.length > 255) shape = shape.filter((_, j) => j % Math.ceil(shape.length / 255) === 0);
+      gEdges.push({ a, b, len: Math.max(1, Math.round(len)), flags, first: gPoints.length, n: shape.length });
+      gPoints.push(...shape);
+    }
+  }
+}
+function graphBlob() {
+  const N = gNodes.length, E = gEdges.length;
+  if (N > 65535 || E > 65535) throw new Error(`road graph too big: ${N} nodes, ${E} edges`);
+  const adj = Array.from({ length: N }, () => []);
+  gEdges.forEach((e, i) => { adj[e.a].push(i); if (e.b !== e.a) adj[e.b].push(i); });
+  const gw = Math.ceil(widthM / GRID_M), gh = Math.ceil(heightM / GRID_M);
+  const cells = Array.from({ length: gw * gh }, () => new Set());
+  gEdges.forEach((e, i) => {
+    const pts = [gNodes[e.a], ...gPoints.slice(e.first, e.first + e.n), gNodes[e.b]];
+    for (let j = 0; j + 1 < pts.length; j++) {
+      const [x0, z0] = pts[j], [x1, z1] = pts[j + 1];
+      for (let cz = Math.floor(Math.min(z0, z1) / GRID_M); cz <= Math.floor(Math.max(z0, z1) / GRID_M); cz++)
+        for (let cx = Math.floor(Math.min(x0, x1) / GRID_M); cx <= Math.floor(Math.max(x0, x1) / GRID_M); cx++)
+          if (cx >= 0 && cz >= 0 && cx < gw && cz < gh) cells[cz * gw + cx].add(i);
+    }
+  });
+  const nEntries = cells.reduce((s, c) => s + c.size, 0), nAdj = adj.reduce((s, a) => s + a.length, 0);
+  const sw = Math.ceil(widthM / SEA_CELL), sh = Math.ceil(heightM / SEA_CELL), rowBytes = Math.ceil(sw / 8);
+  const size = 32 + N * 4 + (N + 1) * 4 + nAdj * 2 + 2 + E * 12 + gPoints.length * 4 + (gw * gh + 1) * 4 + nEntries * 2 + 2 + sh * rowBytes;
+  const buf = Buffer.alloc((size + 3) & ~3);
+  let o = 0;
+  for (const v of [N, E, gw, gh, GRID_M, sw, sh, SEA_CELL]) { buf.writeUInt16LE(v, o); o += 2; }
+  for (const v of [gPoints.length, nAdj, nEntries, 0]) { buf.writeUInt32LE(v, o); o += 4; }
+  for (const [x, z] of gNodes) { buf.writeInt16LE(x, o); buf.writeInt16LE(z, o + 2); o += 4; }
+  let f = 0;
+  for (let i = 0; i <= N; i++) { buf.writeUInt32LE(f, o); o += 4; if (i < N) f += adj[i].length; }
+  for (const a of adj) for (const e of a) { buf.writeUInt16LE(e, o); o += 2; }
+  o = (o + 3) & ~3;
+  for (const e of gEdges) {
+    buf.writeUInt16LE(e.a, o); buf.writeUInt16LE(e.b, o + 2); buf.writeUInt16LE(Math.min(65535, e.len), o + 4);
+    buf.writeUInt8(e.n, o + 6); buf.writeUInt8(e.flags, o + 7); buf.writeUInt32LE(e.first, o + 8); o += 12;
+  }
+  for (const [x, z] of gPoints) { buf.writeInt16LE(x, o); buf.writeInt16LE(z, o + 2); o += 4; }
+  f = 0;
+  for (let i = 0; i <= cells.length; i++) { buf.writeUInt32LE(f, o); o += 4; if (i < cells.length) f += cells[i].size; }
+  for (const c of cells) for (const e of c) { buf.writeUInt16LE(e, o); o += 2; }
+  o = (o + 3) & ~3;
+  let seaBits = 0;
+  for (let j = 0; j < sh; j++) for (let i = 0; i < sw; i++)
+    if (coastAt((i + 0.5) * SEA_CELL, (j + 0.5) * SEA_CELL).sea) { buf[o + j * rowBytes + (i >> 3)] |= 1 << (i & 7); seaBits++; }
+  o += sh * rowBytes;
+  if (o > buf.length) throw new Error('graph blob size mismatch');
+  stats.graph = { nodes: N, edges: E, points: gPoints.length, oneway: gEdges.filter((e) => e.flags & 4).length, cellEntries: nEntries, seaCells: seaBits, bytes: buf.length };
+  return buf;
+}
+
 function globalBlob() {
   const text = names.map((n) => Buffer.from(n + '\0', 'latin1'));
   const textBytes = text.reduce((sum, b) => sum + b.length, 0);
@@ -676,6 +811,9 @@ function globalBlob() {
   return buf;
 }
 const global = globalBlob();
+const graph = graphBlob();
+const MAX_GRAPH_BYTES = 320 * 1024;  // must match GRAPH_BYTES in src/route.c
+if (graph.length > MAX_GRAPH_BYTES) throw new Error(`the road graph takes ${graph.length} bytes (max ${MAX_GRAPH_BYTES})`);
 const MAX_GLOBAL_BYTES = 64 * 1024;  // must match GLOBAL_BYTES in src/world.c
 if (global.length > MAX_GLOBAL_BYTES) throw new Error(`places/roads/names take ${global.length} bytes (max ${MAX_GLOBAL_BYTES})`);
 
@@ -765,13 +903,15 @@ for (let i = 0; i < nTiles; i++) {
 }
 const globalSector = sector, globalSectors = Math.ceil(global.length / SECTOR);
 sector += globalSectors;
+const graphSectors = Math.ceil(graph.length / SECTOR);   // the graph follows the global section
+sector += graphSectors;
 header.write('VMAP', 0, 'ascii');
-header.writeUInt16LE(3, 4);
+header.writeUInt16LE(4, 4);
 header.writeUInt16LE(tilesX, 6);
 header.writeUInt16LE(tilesZ, 8);
 header.writeUInt16LE(TILE, 10);
 header.writeUInt16LE(headerSectors, 12);
-header.writeUInt16LE(0, 14);
+header.writeUInt16LE(graphSectors, 14);
 header.writeInt32LE(Math.round(spawn[0] * UNIT), 16);
 header.writeInt32LE(Math.round(spawn[1] * UNIT), 20);
 header.writeInt16LE(Math.round(((spawn.heading ?? 0) / (2 * Math.PI)) * 4096) & 4095, 24);
@@ -783,6 +923,7 @@ const out = Buffer.alloc(sector * SECTOR);
 header.copy(out, 0);
 for (const [sec, blob] of parts) blob.copy(out, sec * SECTOR);
 global.copy(out, globalSector * SECTOR);
+graph.copy(out, (globalSector + globalSectors) * SECTOR);
 writeFileSync(outPath, out);
 
 const report = {
@@ -792,7 +933,7 @@ const report = {
   streetNames: stats.names.size, spawn: { from: spawnFrom, metres: spawn.map((v) => +v.toFixed(1)) },
   largestTile: { at: worst, bytes: maxBytes, maxVerts }, largestFarTile: maxFar, fileBytes: out.length,
   places: places.length, fuelStations: places.filter((p) => p.kind === 1).length, mechanics: places.filter((p) => p.kind === 2).length,
-  minimapSegments: segs.length, globalBytes: global.length,
+  minimapSegments: segs.length, globalBytes: global.length, roadGraph: stats.graph,
   terrain: dem ? dem.source : 'flat', extraFiles: extraPaths,
   guessedHeights: levelStats,
   coastKm: +stats.coastKm.toFixed(2), seaGroundCells: stats.seaCells, featuresOutsideBox: stats0.outside,

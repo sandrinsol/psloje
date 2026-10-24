@@ -9,6 +9,7 @@
 #include <psxcd.h>
 #include <inline_c.h>
 #include "world.h"
+#include "route.h"
 #include "textures.h"
 
 #define SECTOR      2048
@@ -59,7 +60,7 @@ typedef struct {
 
 typedef struct {
 	char magic[4];
-	uint16_t version, tiles_x, tiles_z, tile_units, header_sectors, pad;
+	uint16_t version, tiles_x, tiles_z, tile_units, header_sectors, graph_sectors;
 	int32_t spawn_x, spawn_z;
 	int16_t spawn_heading;
 	uint16_t global_sectors;
@@ -141,7 +142,7 @@ int world_init(void) {
 	if (!cd_read(map_lba, 1, sector))
 		return 0;
 	memcpy(&header, sector, sizeof(header));
-	if (memcmp(header.magic, "VMAP", 4) || header.version != 3 || header.tiles_x * header.tiles_z > MAX_TILES ||
+	if (memcmp(header.magic, "VMAP", 4) || header.version != 4 || header.tiles_x * header.tiles_z > MAX_TILES ||
 	    header.global_sectors * SECTOR > GLOBAL_BYTES)
 		return 0;
 	memcpy(map_name, header.name, sizeof(map_name) - 1);
@@ -166,6 +167,12 @@ int world_init(void) {
 		p += num_places * sizeof(Place);
 		name_offsets = (const uint16_t *)p;
 		name_text = (const char *)(p + num_names * 2);
+	}
+	/* The road graph (routes, the big map) follows them. */
+	if (header.graph_sectors && header.graph_sectors * SECTOR <= GRAPH_BYTES) {
+		if (!cd_read(map_lba + header.global_sector + header.global_sectors, header.graph_sectors, graph_data))
+			return 0;
+		route_init(header.graph_sectors * SECTOR);
 	}
 	for (int i = 0; i < NUM_NEAR; i++) {
 		near_slots[i].state = SLOT_EMPTY;

@@ -3,7 +3,7 @@
   "rom": "build/game.cue",
   "symbols": "build/game.elf",
   "bios": "openbios",
-  "watch": ["speed_kmh:s32", "fps:s32", "taxi:s32", "taxi+4:s32", "tiles_loaded:s32", "tiles_drawn:s32", "faces_drawn:s32", "cd_errors:s32"],
+  "watch": ["speed_kmh:s32", "fps:s32", "route_count:s32", "route_metres:s32", "bigmap_open:s32", "taxi:s32", "taxi+4:s32", "tiles_loaded:s32", "tiles_drawn:s32", "faces_drawn:s32", "cd_errors:s32"],
   "frameCounter": "frame_count",
   "cpuUsage": "cpu_usage"
 }

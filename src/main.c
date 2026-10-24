@@ -3,8 +3,10 @@
  * OpenStreetMap data (tools/osm2map.mjs) and streamed from the CD.
  *
  * Drive with R2 / Cross / Up (gas), L2 / Down (brake, reverse), the D-pad
- * or left stick (steer) and Square (handbrake). Pick up passengers and take them where they want
- * to go (game.c). The day goes by at a minute a second.
+ * or left stick (steer) and Square (handbrake); Triangle opens and closes
+ * the big map (bigmap.c). Pick up passengers and take them where they want
+ * to go (game.c), following the route (route.c). The day goes by at a
+ * minute a second.
  *
  * Variables the test harness reads by name (see ps1test.json):
  *   frame_count    incremented once per drawn frame (lag detection)
@@ -12,6 +14,7 @@
  *   taxi           the car (position, speed, heading: see car.h)
  *   speed_kmh, fps, tiles_loaded, tiles_drawn, faces_drawn, cd_errors
  *   game_minutes, money, fare_state, meter, fares_done (game.h)
+ *   route_count, route_metres (route.h), bigmap_open (bigmap.h)
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -26,6 +29,8 @@
 #include "world.h"
 #include "car.h"
 #include "game.h"
+#include "route.h"
+#include "bigmap.h"
 
 #define SCREEN_W 320
 #define SCREEN_H 240
@@ -49,7 +54,7 @@ Car taxi;
 static Camera camera;
 
 static uint8_t pad_buffers[2][34];
-static uint16_t held;
+static uint16_t held, pressed;
 static int stick_x, has_stick;
 static int map_ok;
 
@@ -85,11 +90,14 @@ static void init(void) {
 
 static void read_pad(void) {
 	PADTYPE *pad = (PADTYPE *)pad_buffers[0];
+	uint16_t was = held;
 	held = 0;
+	pressed = 0;
 	has_stick = 0;
 	if (pad->stat != 0 || pad->type == 0)
 		return;
 	held = ~pad->btn;
+	pressed = held & ~was;
 	if ((pad->type == PAD_ID_ANALOG_STICK || pad->type == PAD_ID_ANALOG) && pad->len >= 3) {
 		int lx = pad->ls_x - 128;
 		if (lx < -16 || lx > 16) {
@@ -137,6 +145,12 @@ int main(int argc, const char **argv) {
 		if (ticks < 1) ticks = 1;
 		if (ticks > 4) ticks = 4;
 		read_pad();
+		if (pressed & PAD_TRIANGLE) {
+			if (bigmap_open) bigmap_hide();
+			else bigmap_show(&taxi);
+		}
+		if (bigmap_open)
+			bigmap_input(held, pressed);
 		CarInput in = { 0 };
 		/* Gas: R2, Cross or Up; brake / reverse: L2 or Down (easier on a keyboard). */
 		in.gas = !!(held & (PAD_R2 | PAD_CROSS | PAD_UP));
@@ -144,28 +158,43 @@ int main(int argc, const char **argv) {
 		in.handbrake = !!(held & PAD_SQUARE);
 		in.steer = (held & PAD_RIGHT ? 4096 : 0) - (held & PAD_LEFT ? 4096 : 0);
 		if (!in.steer && has_stick) { in.steer = stick_x; in.analog = 1; }
-		for (int t = 0; t < ticks; t++) {
+		/* The game waits while the big map is open. */
+		for (int t = 0; t < ticks && !bigmap_open; t++) {
 			car_tick(&taxi, &in);
 			car_camera(&taxi, &camera, 0);
 		}
 		speed_kmh = car_kmh(&taxi);
-		game_update(&taxi, ticks);
+		if (!bigmap_open)
+			game_update(&taxi, ticks);
+		route_update(CAR_TO_WORLD(taxi.x), CAR_TO_WORLD(taxi.z), taxi.heading >> 8);
 
 		world_stream(CAR_TO_WORLD(taxi.x), CAR_TO_WORLD(taxi.z), 0);
 
 		ClearOTagR(b->ot, OT_LEN);
 		uint8_t *prim = b->prims, *end = b->prims + PRIM_LEN - 4096;
-		prim = world_draw(&camera, b->ot, prim, end);
-		prim = car_draw(&taxi, &camera, b->ot, prim);
-		prim = game_draw_world(&taxi, &camera, b->ot, prim);
-		prim = game_draw_hud(&taxi, &camera, b->ot, prim);
-		if (frame_count < 150) {
+		if (bigmap_open) {
+			int pickup;
+			const Place *target = game_target(&pickup);
+			prim = bigmap_draw(&taxi, target, pickup, b->ot, prim, end);
+		} else {
+			prim = world_draw(&camera, b->ot, prim, end);
+			prim = car_draw(&taxi, &camera, b->ot, prim);
+			prim = game_draw_world(&taxi, &camera, b->ot, prim);
+			prim = game_draw_hud(&taxi, &camera, b->ot, prim);
+		}
+		if (frame_count < 150 && !bigmap_open) {
 			/* The map's name for the first seconds. */
 			prim = FntSort(b->ot, prim, 160 - 4 * (int)strlen(map_name), 76, map_name);
 			/* Credits the data's licences require (ODbL, Copernicus). */
 			prim = FntSort(b->ot, prim, 40, 92, "(C) OPENSTREETMAP CONTRIBUTORS");
 			prim = FntSort(b->ot, prim, 28, 104, "BUILDINGS: MICROSOFT VIA OVERTURE");
 			prim = FntSort(b->ot, prim, 28, 116, "TERRAIN: COPERNICUS DEM (EU, ESA)");
+			/* No texture window for this text (added last: drawn first). */
+			DR_TWIN *w = (DR_TWIN *)prim;
+			RECT none = { 0, 0, 0, 0 };
+			setTexWindow(w, &none);
+			addPrim(b->ot, w);
+			prim += sizeof(DR_TWIN);
 		}
 
 		frame_count++;
