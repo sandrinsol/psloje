@@ -16,7 +16,7 @@ import pyarrow.parquet as pq, requests
 from shapely import wkb
 from xml.sax.saxutils import quoteattr
 
-BOX = (19.474, 40.418, 19.500, 40.475)   # minlon, minlat, maxlon, maxlat (= tools/fetch-vlora.sh)
+BOX = (19.450, 40.405, 19.525, 40.495)   # minlon, minlat, maxlon, maxlat (= tools/fetch-vlora.sh)
 BASE = 'https://overturemaps-us-west-2.s3.amazonaws.com/'
 release = sys.argv[1] if len(sys.argv) > 1 else '2026-10-21.0'
 out = sys.argv[2] if len(sys.argv) > 2 else 'data/vlora-extra-buildings.osm'

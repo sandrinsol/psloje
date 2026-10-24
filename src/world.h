@@ -11,8 +11,10 @@
 #define UNIT             16          /* world units per metre */
 #define TILE_UNITS       1024        /* 64 m */
 #define MAX_TILE_VERTS   2400        /* must match tools/osm2map.mjs */
-#define TILE_SLOT_BYTES  (40 * 1024) /* must be >= the biggest tile */
-#define LOAD_RADIUS      2           /* tiles kept around the car: 5 x 5 */
+#define TILE_SLOT_BYTES  (20 * 1024) /* must match MAX_TILE_BYTES in tools/osm2map.mjs */
+#define FAR_SLOT_BYTES   (6 * 1024)  /* must match MAX_FAR_BYTES */
+#define LOAD_RADIUS      2           /* detailed tiles around the car: 5 x 5 */
+#define FAR_RADIUS       3           /* far tiles (building boxes) out to 7 x 7 */
 
 #define OT_LEN           2048
 /* The GTE gets the camera matrix scaled by GTE_SCALE: the picture is the same
@@ -23,8 +25,8 @@
 #define ZM(metres)       ((metres) * UNIT * GTE_SCALE)
 #define NEAR_Z           104         /* > H/2: about 0.93 m */
 #define TEX_DIST         ZM(50)      /* textured closer than this */
-#define FOG_START        ZM(55)
-#define FOG_END          ZM(120)
+#define FOG_START        ZM(80)
+#define FOG_END          ZM(170)
 
 typedef struct {
 	int32_t x, y, z;   /* world units */

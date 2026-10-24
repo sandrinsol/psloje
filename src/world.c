@@ -12,8 +12,9 @@
 #include "textures.h"
 
 #define SECTOR      2048
-#define MAX_TILES   4096
-#define NUM_SLOTS   ((2 * LOAD_RADIUS + 1) * (2 * LOAD_RADIUS + 1) + 2)
+#define MAX_TILES   16384
+#define NUM_NEAR    ((2 * LOAD_RADIUS + 1) * (2 * LOAD_RADIUS + 1) + 2)
+#define NUM_FAR     ((2 * FAR_RADIUS + 1) * (2 * FAR_RADIUS + 1) - (2 * LOAD_RADIUS + 1) * (2 * LOAD_RADIUS + 1) + 8)
 #define SLOT_EMPTY  0
 #define SLOT_LOAD   1
 #define SLOT_READY  2
@@ -21,13 +22,15 @@
 typedef struct {
 	uint16_t nverts, nfaces, nedges, nflat;
 	int16_t minx, minz, maxx, maxz, miny, flags;   /* flags 1: height grid after the edges */
-	uint16_t ngroups, pad;
+	uint16_t ngroups, nsegs, nflatverts, pad;   /* vertices: the flat faces' first, then each group's */
 } TileHeader;
 
 /* One building: culled as a whole, fine faces near, coarse ones far. */
 typedef struct {
 	int16_t cx, cz, r, top, bottom;   /* tile-local units; top/bottom are Y (negative = up) */
 	uint16_t first, nfine, ncoarse;   /* faces; coarse follow the fine (0: use the fine) */
+	uint16_t vfirst, vcount;          /* its vertices */
+	uint16_t nroof, pad;              /* the last nroof faces (fine and coarse) are the roof */
 } Group;
 
 typedef struct {
@@ -50,11 +53,13 @@ typedef struct {
 	Edge *edges;
 	int16_t *heights;   /* 9 x 9 ground Y every 8 m, or 0 */
 	Group *groups;
+	RoadSeg *segs;
+	uint32_t *data;
 } Slot;
 
 typedef struct {
 	char magic[4];
-	uint16_t version, tiles_x, tiles_z, tile_units, header_sectors, max_sectors;
+	uint16_t version, tiles_x, tiles_z, tile_units, header_sectors, pad;
 	int32_t spawn_x, spawn_z;
 	int16_t spawn_heading;
 	uint16_t global_sectors;
@@ -62,27 +67,29 @@ typedef struct {
 	uint32_t global_sector;
 } MapHeader;
 
-#define GLOBAL_BYTES (160 * 1024)   /* must match tools/osm2map.mjs */
+#define GLOBAL_BYTES (64 * 1024)   /* places and names; must match tools/osm2map.mjs */
 
 Colour fog_colour = { 172, 190, 204 };
 Colour light = { 128, 128, 128 };
 char map_name[32];
 volatile int32_t tiles_loaded, tiles_drawn, faces_drawn, cd_errors;
+volatile int32_t stat_faces_seen, stat_groups_seen, stat_groups_drawn, stat_far_tiles, stat_verts;
 
 static MapHeader header;
-static uint32_t index_sector[MAX_TILES];
-static uint16_t index_count[MAX_TILES];
+/* Per tile: first sector << 10 | far sectors << 5 | near sectors (the far
+ * blob, then the near one). */
+static uint32_t tile_index[MAX_TILES];
 static int map_lba;
-static Slot slots[NUM_SLOTS];
-static uint32_t slot_data[NUM_SLOTS][TILE_SLOT_BYTES / 4];
-static int reading = -1;   /* slot being read, or -1 */
+/* Near: everything, within LOAD_RADIUS tiles. Far: building boxes and coarse
+ * ground, out to FAR_RADIUS tiles (the view reaches ~200 m). */
+static Slot near_slots[NUM_NEAR], far_slots[NUM_FAR];
+static uint32_t near_data[NUM_NEAR][TILE_SLOT_BYTES / 4];
+static uint32_t far_data[NUM_FAR][FAR_SLOT_BYTES / 4];
+static Slot *reading;   /* slot being read, or 0 */
 
 static uint32_t global_data[GLOBAL_BYTES / 4];
 const Place *places;
 int num_places;
-static const RoadSeg *segs;
-static int num_segs;
-static const uint16_t *seg_bucket;   /* per tile: first, count */
 static const uint16_t *name_offsets;
 static const char *name_text;
 static int num_names;
@@ -134,7 +141,7 @@ int world_init(void) {
 	if (!cd_read(map_lba, 1, sector))
 		return 0;
 	memcpy(&header, sector, sizeof(header));
-	if (memcmp(header.magic, "VMAP", 4) || header.version < 2 || header.tiles_x * header.tiles_z > MAX_TILES ||
+	if (memcmp(header.magic, "VMAP", 4) || header.version != 3 || header.tiles_x * header.tiles_z > MAX_TILES ||
 	    header.global_sectors * SECTOR > GLOBAL_BYTES)
 		return 0;
 	memcpy(map_name, header.name, sizeof(map_name) - 1);
@@ -144,33 +151,30 @@ int world_init(void) {
 	for (int s = 0, t = 0; s < header.header_sectors && t < n; s++) {
 		if (s > 0 && !cd_read(map_lba + s, 1, sector))
 			return 0;
-		const uint8_t *p = (const uint8_t *)sector;
-		int start = s == 0 ? 64 : 0;
-		for (int off = start; off + 8 <= SECTOR && t < n; off += 8, t++) {
-			index_sector[t] = p[off] | p[off + 1] << 8 | p[off + 2] << 16 | p[off + 3] << 24;
-			index_count[t] = p[off + 4] | p[off + 5] << 8;
-		}
+		for (int i = s == 0 ? 16 : 0; i < SECTOR / 4 && t < n; i++, t++)
+			tile_index[t] = sector[i];
 	}
-	/* Places, minimap roads and names: read once, kept in RAM. */
+	/* Places and names: read once, kept in RAM. */
 	if (header.global_sectors) {
 		if (!cd_read(map_lba + header.global_sector, header.global_sectors, global_data))
 			return 0;
 		const uint16_t *g = (const uint16_t *)global_data;
 		num_places = g[0];
-		num_segs = g[1];
-		num_names = g[2];
+		num_names = g[1];
 		const uint8_t *p = (const uint8_t *)global_data + 8;
 		places = (const Place *)p;
 		p += num_places * sizeof(Place);
-		seg_bucket = (const uint16_t *)p;
-		p += g[3] * 4;
-		segs = (const RoadSeg *)p;
-		p += num_segs * sizeof(RoadSeg);
 		name_offsets = (const uint16_t *)p;
 		name_text = (const char *)(p + num_names * 2);
 	}
-	for (int i = 0; i < NUM_SLOTS; i++)
-		slots[i].state = SLOT_EMPTY;
+	for (int i = 0; i < NUM_NEAR; i++) {
+		near_slots[i].state = SLOT_EMPTY;
+		near_slots[i].data = near_data[i];
+	}
+	for (int i = 0; i < NUM_FAR; i++) {
+		far_slots[i].state = SLOT_EMPTY;
+		far_slots[i].data = far_data[i];
+	}
 	return 1;
 }
 
@@ -180,18 +184,33 @@ const char *world_name(int id) {
 	return name_text + name_offsets[id];
 }
 
+static int tile_dist(const Slot *s, int tx, int tz) {
+	int dx = s->tx - tx, dz = s->tz - tz;
+	if (dx < 0) dx = -dx;
+	if (dz < 0) dz = -dz;
+	return dx > dz ? dx : dz;
+}
+
+static Slot *find_slot(Slot *slots, int n, int tx, int tz) {
+	for (int i = 0; i < n; i++)
+		if (slots[i].state != SLOT_EMPTY && slots[i].tx == tx && slots[i].tz == tz)
+			return &slots[i];
+	return 0;
+}
+
+static Slot *near_ready(int tx, int tz) {
+	Slot *s = find_slot(near_slots, NUM_NEAR, tx, tz);
+	return s && s->state == SLOT_READY ? s : 0;
+}
+
 void world_segments(int32_t x, int32_t z, int radius_tiles, void (*fn)(const RoadSeg *, void *), void *arg) {
-	if (!segs)
-		return;
 	int ctx = x / TILE_UNITS, ctz = z / TILE_UNITS;
-	for (int tz = ctz - radius_tiles; tz <= ctz + radius_tiles; tz++) {
-		if (tz < 0 || tz >= header.tiles_z) continue;
-		for (int tx = ctx - radius_tiles; tx <= ctx + radius_tiles; tx++) {
-			if (tx < 0 || tx >= header.tiles_x) continue;
-			const uint16_t *b = seg_bucket + (tz * header.tiles_x + tx) * 2;
-			for (int i = 0; i < b[1]; i++)
-				fn(&segs[b[0] + i], arg);
-		}
+	for (int i = 0; i < NUM_NEAR; i++) {
+		Slot *s = &near_slots[i];
+		if (s->state != SLOT_READY || tile_dist(s, ctx, ctz) > radius_tiles)
+			continue;
+		for (int k = 0; k < s->h->nsegs; k++)
+			fn(&s->segs[k], arg);
 	}
 }
 
@@ -229,89 +248,115 @@ void world_size(int32_t *w, int32_t *h) {
 }
 
 static void slot_ready(Slot *s) {
-	uint8_t *p = (uint8_t *)slot_data[s - slots];
+	uint8_t *p = (uint8_t *)s->data;
 	s->h = (TileHeader *)p;
 	s->verts = (SVECTOR *)(p + sizeof(TileHeader));
 	s->faces = (Face *)(s->verts + s->h->nverts);
 	s->edges = (Edge *)(s->faces + s->h->nfaces);
 	s->heights = s->h->flags & 1 ? (int16_t *)(s->edges + s->h->nedges) : 0;
 	s->groups = (Group *)(s->heights ? s->heights + 81 : (int16_t *)(s->edges + s->h->nedges));
+	s->segs = (RoadSeg *)(s->groups + s->h->ngroups);
 	s->state = SLOT_READY;
 	tiles_loaded++;
 }
 
-static int tile_dist(const Slot *s, int tx, int tz) {
-	int dx = s->tx - tx, dz = s->tz - tz;
-	if (dx < 0) dx = -dx;
-	if (dz < 0) dz = -dz;
-	return dx > dz ? dx : dz;
+/* The closest tile in the ring min_d..max_d (Chebyshev) around (ctx, ctz)
+ * that has no slot yet in `slots` (and, for far ones, no near copy). */
+static int missing(Slot *slots, int n, int ctx, int ctz, int min_d, int max_d, int *otx, int *otz) {
+	int best = 1 << 30;
+	for (int dz = -max_d; dz <= max_d; dz++) {
+		for (int dx = -max_d; dx <= max_d; dx++) {
+			int adx = dx < 0 ? -dx : dx, adz = dz < 0 ? -dz : dz;
+			if ((adx > adz ? adx : adz) < min_d)
+				continue;
+			int tx = ctx + dx, tz = ctz + dz;
+			if (tx < 0 || tz < 0 || tx >= header.tiles_x || tz >= header.tiles_z)
+				continue;
+			int d = dx * dx + dz * dz;
+			if (d >= best || find_slot(slots, n, tx, tz) || (slots == far_slots && near_ready(tx, tz)))
+				continue;
+			best = d;
+			*otx = tx;
+			*otz = tz;
+		}
+	}
+	return best < (1 << 30);
 }
 
-static int find_slot(int tx, int tz) {
-	for (int i = 0; i < NUM_SLOTS; i++)
-		if (slots[i].state != SLOT_EMPTY && slots[i].tx == tx && slots[i].tz == tz)
-			return i;
-	return -1;
+/* A free slot, else the ready one furthest beyond keep_d (far slots whose
+ * tile now has a near copy are free too), else 0. */
+static Slot *free_slot(Slot *slots, int n, int ctx, int ctz, int keep_d) {
+	Slot *pick = 0;
+	int far = keep_d;
+	for (int i = 0; i < n; i++) {
+		Slot *s = &slots[i];
+		if (s->state == SLOT_EMPTY) return s;
+		if (s->state != SLOT_READY) continue;
+		if (slots == far_slots && near_ready(s->tx, s->tz)) return s;
+		int d = tile_dist(s, ctx, ctz);
+		if (d > far) { far = d; pick = s; }
+	}
+	return pick;
 }
 
 void world_stream(int32_t x, int32_t z, int wait) {
+	static int last_ctx = -1, last_ctz = -1, complete;
 	int ctx = x / TILE_UNITS, ctz = z / TILE_UNITS;
+	/* Nothing to do while everything around this tile is in. */
+	if (ctx != last_ctx || ctz != last_ctz) {
+		last_ctx = ctx;
+		last_ctz = ctz;
+		complete = 0;
+	}
+	if (complete && !reading)
+		return;
 
-	do {
+	for (;;) {
 		/* Finish the read in flight. */
-		if (reading >= 0) {
+		if (reading) {
 			int r = CdReadSync(wait ? 0 : 1, 0);
+			if (r > 0)
+				return;   /* still reading */
 			if (r < 0) {
 				cd_errors++;
-				slots[reading].state = SLOT_EMPTY;   /* try again later */
-				reading = -1;
-			} else if (r == 0) {
-				slot_ready(&slots[reading]);
-				reading = -1;
+				reading->state = SLOT_EMPTY;   /* try again later */
 			} else {
-				return;   /* still reading */
+				slot_ready(reading);
 			}
+			reading = 0;
 		}
-		/* Closest missing tile within the radius. */
-		int best_tx = 0, best_tz = 0, best_d = 99;
-		for (int dz = -LOAD_RADIUS; dz <= LOAD_RADIUS; dz++) {
-			for (int dx = -LOAD_RADIUS; dx <= LOAD_RADIUS; dx++) {
-				int tx = ctx + dx, tz = ctz + dz;
-				if (tx < 0 || tz < 0 || tx >= header.tiles_x || tz >= header.tiles_z)
-					continue;
-				int d = (dx < 0 ? -dx : dx) + (dz < 0 ? -dz : dz);
-				if (d < best_d && find_slot(tx, tz) < 0) {
-					best_d = d;
-					best_tx = tx;
-					best_tz = tz;
-				}
+		/* Near tiles first (closest first), then the far ring. Waiting (at the
+		 * start) only covers the near ones. */
+		int tx, tz, is_near = 1;
+		if (!missing(near_slots, NUM_NEAR, ctx, ctz, 0, LOAD_RADIUS, &tx, &tz)) {
+			if (wait)
+				return;
+			if (!missing(far_slots, NUM_FAR, ctx, ctz, LOAD_RADIUS + 1, FAR_RADIUS, &tx, &tz)) {
+				complete = 1;
+				return;
 			}
+			is_near = 0;
 		}
-		if (best_d == 99)
-			return;   /* everything is in */
-		/* A free slot, or the one furthest outside the radius. */
-		int slot = -1, far = LOAD_RADIUS;
-		for (int i = 0; i < NUM_SLOTS; i++) {
-			if (slots[i].state == SLOT_EMPTY) { slot = i; break; }
-			int d = tile_dist(&slots[i], ctx, ctz);
-			if (slots[i].state == SLOT_READY && d > far) { far = d; slot = i; }
-		}
-		if (slot < 0)
+		Slot *s = is_near ? free_slot(near_slots, NUM_NEAR, ctx, ctz, LOAD_RADIUS)
+		                  : free_slot(far_slots, NUM_FAR, ctx, ctz, FAR_RADIUS);
+		if (!s)
 			return;
-		Slot *s = &slots[slot];
-		int t = best_tz * header.tiles_x + best_tx;
-		s->tx = best_tx;
-		s->tz = best_tz;
-		if (index_count[t] == 0 || index_count[t] * SECTOR > TILE_SLOT_BYTES) {
-			/* Empty (or impossible) tile: nothing to read. */
-			memset(slot_data[slot], 0, sizeof(TileHeader));
+		uint32_t e = tile_index[tz * header.tiles_x + tx];
+		int first = e >> 10, nfar = (e >> 5) & 31, nnear = e & 31;
+		int lba = map_lba + first + (is_near ? nfar : 0), count = is_near ? nnear : nfar;
+		s->tx = tx;
+		s->tz = tz;
+		if (!count || count * SECTOR > (is_near ? TILE_SLOT_BYTES : FAR_SLOT_BYTES)) {
+			memset(s->data, 0, sizeof(TileHeader));   /* nothing to read */
 			slot_ready(s);
 			continue;
 		}
 		s->state = SLOT_LOAD;
-		reading = slot;
-		cd_start_read(map_lba + index_sector[t], index_count[t], slot_data[slot]);
-	} while (wait || reading < 0);
+		reading = s;
+		cd_start_read(lba, count, s->data);
+		if (!wait)
+			return;   /* one read per frame */
+	}
 }
 
 /* ---- GTE ----------------------------------------------------------------------- */
@@ -382,6 +427,23 @@ static inline int on_screen(int x, int y) {
 }
 
 /* Too big for the GPU (max 1023 x 511): such faces get split. */
+/* Screen-space size (larger of width and height). */
+static inline int extent(const DVECTOR *p, int n) {
+	int xmin = p[0].vx, xmax = p[0].vx, ymin = p[0].vy, ymax = p[0].vy;
+	for (int i = 1; i < n; i++) {
+		if (p[i].vx < xmin) xmin = p[i].vx;
+		if (p[i].vx > xmax) xmax = p[i].vx;
+		if (p[i].vy < ymin) ymin = p[i].vy;
+		if (p[i].vy > ymax) ymax = p[i].vy;
+	}
+	return xmax - xmin > ymax - ymin ? xmax - xmin : ymax - ymin;
+}
+
+/* Textured faces close to the camera are split until they are this small on
+ * screen: the PS1 maps textures without perspective, so big ones warp. */
+#define WARP_DIST   ZM(30)
+#define WARP_SIZE   120
+
 static inline int too_big(const DVECTOR *p, int n) {
 	int xmin = p[0].vx, xmax = p[0].vx, ymin = p[0].vy, ymax = p[0].vy;
 	for (int i = 1; i < n; i++) {
@@ -393,7 +455,9 @@ static inline int too_big(const DVECTOR *p, int n) {
 	return xmax - xmin > 1000 || ymax - ymin > 500;
 }
 
-static void emit(const Face *f, DVECTOR *p, int32_t *z, int u0, int v0, int u1, int v1, int tri, uint32_t *ot) {
+/* smooth: Gouraud fog per corner (the ground, where steps would show); else
+ * one fog value per face (buildings: cheaper, and small on screen). */
+static void emit(const Face *f, DVECTOR *p, int32_t *z, int u0, int v0, int u1, int v1, int tri, uint32_t *ot, int smooth) {
 	int tex = f->texlayer & 15;
 	int zmax = z[0];
 	for (int i = 1; i < (tri ? 3 : 4); i++) if (z[i] > zmax) zmax = z[i];
@@ -416,15 +480,43 @@ static void emit(const Face *f, DVECTOR *p, int32_t *z, int u0, int v0, int u1, 
 		setPolyFT4(q);
 		setXY4(q, p[0].vx, p[0].vy, p[1].vx, p[1].vy, p[2].vx, p[2].vy, p[3].vx, p[3].vy);
 		int tu = (tex & 1) * 64, tv = (tex >> 1) * 64;
-		setUV4(q, tu + u0, tv + v0, tu + u1, tv + v0, tu + u0, tv + v1, tu + u1, tv + v1);
+		setUV4(q, u0, v0, u1, v0, u0, v1, u1, v1);   /* the texture window picks the texture */
 		setRGB0(q, f->r * light.r >> 7, f->g * light.g >> 7, f->b * light.b >> 7);
 		q->tpage = tpage;
 		q->clut = clut;
 		addPrim(ot, q);
 		prim += sizeof(POLY_FT4);
+		/* Texture window: this face's 64 x 64 texture repeats across it (UVs
+		 * up to 255). Added after the face, so drawn just before it. */
+		DR_TWIN *w = (DR_TWIN *)prim;
+		RECT win = { tu >> 3, tv >> 3, 24, 24 };   /* offset, mask: 8-pixel units */
+		setTexWindow(w, &win);
+		addPrim(ot, w);
+		prim += sizeof(DR_TWIN);
 	} else {
 		uint8_t c[3], c0[3], c1[3], c2[3];
 		base_colour(f, c);
+		if (!smooth) {
+			int zavg = tri ? (z[0] + z[1] + z[2]) / 3 : (z[0] + z[1] + z[2] + z[3]) >> 2;
+			fogged(c0, c, zavg);
+			if (tri) {
+				POLY_F3 *q = (POLY_F3 *)prim;
+				setPolyF3(q);
+				setXY3(q, p[0].vx, p[0].vy, p[1].vx, p[1].vy, p[2].vx, p[2].vy);
+				setRGB0(q, c0[0], c0[1], c0[2]);
+				addPrim(ot, q);
+				prim += sizeof(POLY_F3);
+			} else {
+				POLY_F4 *q = (POLY_F4 *)prim;
+				setPolyF4(q);
+				setXY4(q, p[0].vx, p[0].vy, p[1].vx, p[1].vy, p[2].vx, p[2].vy, p[3].vx, p[3].vy);
+				setRGB0(q, c0[0], c0[1], c0[2]);
+				addPrim(ot, q);
+				prim += sizeof(POLY_F4);
+			}
+			faces_drawn++;
+			return;
+		}
 		fogged(c0, c, z[0]);
 		fogged(c1, c, z[1]);
 		fogged(c2, c, z[2]);
@@ -502,13 +594,15 @@ static void draw_split(const Face *f, int flat, const SVECTOR *c, int u0, int v0
 	int ok = nearc == 0;
 	for (int i = 0; ok && i < 4; i++) ok = on_screen(p[i].vx, p[i].vy);
 	if (ok) ok = !too_big(p, 4);
+	if (ok && depth < 2 && (f->texlayer & 15) < NUM_TEXTURES && z[0] < WARP_DIST && extent(p, 4) > WARP_SIZE)
+		ok = 0;   /* close and big: split to keep the texture from warping */
 	if (ok) {
 		if (!front_facing(p[0], p[1], p[2]) && !front_facing(p[1], p[3], p[2]))
 			return;
-		emit(f, p, z, u0, v0, u1, v1, 0, ot_slot(f, flat, z, 4));
+		emit(f, p, z, u0, v0, u1, v1, 0, ot_slot(f, flat, z, 4), flat);
 		return;
 	}
-	if (depth >= 5)
+	if (depth >= 4)
 		return;
 	/* Bilinear split into four: corners 0 1 / 2 3 (Z order). */
 	SVECTOR m[9];
@@ -529,33 +623,62 @@ static void draw_split(const Face *f, int flat, const SVECTOR *c, int u0, int v0
 	}
 }
 
+/* Vertices first .. first + n into the screen-space cache. */
+static void transform(const SVECTOR *v, int first, int n) {
+	stat_verts += n;
+	int i = first, end = first + n;
+	for (; i + 3 <= end; i += 3) {
+		gte_ldv3(&v[i], &v[i + 1], &v[i + 2]);
+		gte_rtpt();
+		gte_stsxy3(&sxy[i], &sxy[i + 1], &sxy[i + 2]);
+		gte_stsz3(&sz[i], &sz[i + 1], &sz[i + 2]);
+	}
+	for (; i < end; i++) {
+		gte_ldv0(&v[i]);
+		gte_rtps();
+		gte_stsxy(&sxy[i]);
+		gte_stsz(&sz[i]);
+	}
+}
+
 static void draw_faces(const Face *f, int n, const SVECTOR *v, int flat) {
+	stat_faces_seen += n;
 	for (int k = 0; k < n; k++, f++) {
+		/* One pass, cheapest rejections first: every read is a trip to main
+		 * RAM on the PS1 (no data cache). */
 		int tri = f->v[3] == 0xffff;
-		int nv = tri ? 3 : 4;
-		DVECTOR p[4];
-		int32_t z[4];
-		int nearc = 0, farc = 0;
-		for (int j = 0; j < nv; j++) {
-			p[j] = sxy[f->v[j]];
-			z[j] = sz[f->v[j]];
-			if (z[j] < NEAR_Z) nearc++;
-			if (z[j] > FOG_END) farc++;
-		}
-		if (nearc == nv || farc == nv)
+		int i0 = f->v[0], i1 = f->v[1], i2 = f->v[2], i3 = tri ? i2 : f->v[3];
+		int32_t z[4] = { sz[i0], sz[i1], sz[i2], sz[i3] };
+		int nearc = (z[0] < NEAR_Z) + (z[1] < NEAR_Z) + (z[2] < NEAR_Z) + (z[3] < NEAR_Z);
+		if (nearc == 4 || (z[0] > FOG_END && z[1] > FOG_END && z[2] > FOG_END && z[3] > FOG_END))
 			continue;
-		int split = nearc > 0;
-		for (int j = 0; !split && j < nv; j++) split = !on_screen(p[j].vx, p[j].vy);
-		if (!split) split = too_big(p, nv);
-		if (split) {
-			SVECTOR c[4];
-			for (int j = 0; j < 4; j++) c[j] = v[f->v[tri && j == 3 ? 2 : j]];
+		if (nearc) {
+			SVECTOR c[4] = { v[i0], v[i1], v[i2], v[i3] };
 			draw_split(f, flat, c, f->u0, f->v0, f->u1, f->v1, 0);
 			continue;
 		}
+		DVECTOR p[4] = { sxy[i0], sxy[i1], sxy[i2], sxy[i3] };
+		/* Facing away: the back of walls and roofs, slopes beyond a hilltop. */
 		if (!front_facing(p[0], p[1], p[2]) && (tri || !front_facing(p[1], p[3], p[2])))
 			continue;
-		emit(f, p, z, f->u0, f->v0, f->u1, f->v1, tri, ot_slot(f, flat, z, nv));
+		int xmin = p[0].vx, xmax = p[0].vx, ymin = p[0].vy, ymax = p[0].vy;
+		for (int j = 1; j < 4; j++) {
+			if (p[j].vx < xmin) xmin = p[j].vx;
+			if (p[j].vx > xmax) xmax = p[j].vx;
+			if (p[j].vy < ymin) ymin = p[j].vy;
+			if (p[j].vy > ymax) ymax = p[j].vy;
+		}
+		if (xmax < 0 || xmin >= 320 || ymax < 0 || ymin >= 240)
+			continue;   /* off screen */
+		int w = xmax - xmin, h = ymax - ymin;
+		if (xmin <= -1000 || xmax >= 1000 || ymin <= -1000 || ymax >= 1000 || w > 1000 || h > 500 ||
+		    (!tri && (f->texlayer & 15) < NUM_TEXTURES && z[0] < WARP_DIST && (w > WARP_SIZE || h > WARP_SIZE))) {
+			/* Too big for the GPU, or close and big enough for the texture to warp. */
+			SVECTOR c[4] = { v[i0], v[i1], v[i2], v[i3] };
+			draw_split(f, flat, c, f->u0, f->v0, f->u1, f->v1, 0);
+			continue;
+		}
+		emit(f, p, z, f->u0, f->v0, f->u1, f->v1, tri, ot_slot(f, flat, z, tri ? 3 : 4), flat);
 	}
 }
 
@@ -595,27 +718,15 @@ static void draw_tile(const Camera *cam, const Slot *s) {
 	m.t[2] = (cam->m.m[2][0] * dx + cam->m.m[2][1] * dy + cam->m.m[2][2] * dz) * GTE_SCALE >> 12;
 	gte_load_matrix(&m);
 
-	int n = h->nverts;
 	const SVECTOR *v = s->verts;
-	int i = 0;
-	for (; i + 3 <= n; i += 3) {
-		gte_ldv3(&v[i], &v[i + 1], &v[i + 2]);
-		gte_rtpt();
-		gte_stsxy3(&sxy[i], &sxy[i + 1], &sxy[i + 2]);
-		gte_stsz3(&sz[i], &sz[i + 1], &sz[i + 2]);
-	}
-	for (; i < n; i++) {
-		gte_ldv0(&v[i]);
-		gte_rtps();
-		gte_stsxy(&sxy[i]);
-		gte_stsz(&sz[i]);
-	}
-
+	transform(v, 0, h->nflatverts);
 	draw_faces(s->faces, h->nflat, v, 1);
 
 	/* Buildings: one bounding-sphere test each (camera space, unscaled), then
 	 * fine faces if any part is within texture distance, else coarse ones. */
 	const Group *g = s->groups;
+	stat_groups_seen += h->ngroups;
+	if (!s->heights) stat_far_tiles++;
 	for (int i = 0; i < h->ngroups; i++, g++) {
 		int32_t x = ox + g->cx - cam->x, y = ((g->top + g->bottom) >> 1) - cam->y, z = oz + g->cz - cam->z;
 		int32_t r = g->r + ((g->bottom - g->top) >> 1);   /* sphere around the box, roughly */
@@ -626,10 +737,14 @@ static void draw_tile(const Camera *cam, const Slot *s) {
 		/* Outside the sides of the view (half-width 0.8, sphere: r * sqrt(1 + 0.64)). */
 		if (cx * 5 > cz * 4 + r * 7 || -cx * 5 > cz * 4 + r * 7)
 			continue;
+		stat_groups_drawn++;
+		transform(v, g->vfirst, g->vcount);   /* only buildings we draw */
+		/* The roof only shows from above it (e.g. from the hills). */
+		int roof = cam->y < g->top ? 0 : g->nroof;
 		if ((cz - r) * GTE_SCALE < TEX_DIST || !g->ncoarse)
-			draw_faces(s->faces + g->first, g->nfine, v, 0);
+			draw_faces(s->faces + g->first, g->nfine - roof, v, 0);
 		else
-			draw_faces(s->faces + g->first + g->nfine, g->ncoarse, v, 0);
+			draw_faces(s->faces + g->first + g->nfine, g->ncoarse - roof, v, 0);
 	}
 }
 
@@ -639,9 +754,25 @@ uint8_t *world_draw(const Camera *cam, uint32_t *ot, uint8_t *prims, uint8_t *pr
 	ot_base = ot;
 	tiles_drawn = 0;
 	faces_drawn = 0;
-	for (int i = 0; i < NUM_SLOTS; i++)
-		if (slots[i].state == SLOT_READY)
-			draw_tile(cam, &slots[i]);
+	stat_faces_seen = stat_groups_seen = stat_groups_drawn = stat_far_tiles = stat_verts = 0;
+	for (int i = 0; i < NUM_NEAR; i++)
+		if (near_slots[i].state == SLOT_READY)
+			draw_tile(cam, &near_slots[i]);
+	/* Far tiles, unless the detailed copy is in (looked up in a small grid). */
+	uint8_t has_near[2 * FAR_RADIUS + 1][2 * FAR_RADIUS + 1] = { { 0 } };
+	int ctx = cam->x / TILE_UNITS, ctz = cam->z / TILE_UNITS;
+	for (int i = 0; i < NUM_NEAR; i++) {
+		int dx = near_slots[i].tx - ctx + FAR_RADIUS, dz = near_slots[i].tz - ctz + FAR_RADIUS;
+		if (near_slots[i].state == SLOT_READY && dx >= 0 && dz >= 0 && dx <= 2 * FAR_RADIUS && dz <= 2 * FAR_RADIUS)
+			has_near[dz][dx] = 1;
+	}
+	for (int i = 0; i < NUM_FAR; i++) {
+		Slot *s = &far_slots[i];
+		int dx = s->tx - ctx + FAR_RADIUS, dz = s->tz - ctz + FAR_RADIUS;
+		if (s->state != SLOT_READY || dx < 0 || dz < 0 || dx > 2 * FAR_RADIUS || dz > 2 * FAR_RADIUS || has_near[dz][dx])
+			continue;
+		draw_tile(cam, s);
+	}
 	return prim;
 }
 
@@ -663,15 +794,15 @@ int32_t world_ground_y(int32_t x, int32_t z) {
 	if (x < 0 || z < 0)
 		return 0;
 	int tx = x / TILE_UNITS, tz = z / TILE_UNITS;
-	int i = find_slot(tx, tz);
-	if (i < 0 || slots[i].state != SLOT_READY || !slots[i].heights)
+	Slot *s = near_ready(tx, tz);
+	if (!s || !s->heights)
 		return 0;
 	/* 8 m = 128 units per grid step; bilinear. */
 	int32_t lx = x - tx * TILE_UNITS, lz = z - tz * TILE_UNITS;
 	int gx = lx >> 7, gz = lz >> 7, fx = lx & 127, fz = lz & 127;
 	if (gx > 7) gx = 7, fx = 128;
 	if (gz > 7) gz = 7, fz = 128;
-	const int16_t *h = slots[i].heights + gz * 9 + gx;
+	const int16_t *h = s->heights + gz * 9 + gx;
 	int32_t a = h[0] + ((h[1] - h[0]) * fx >> 7);
 	int32_t b = h[9] + ((h[10] - h[9]) * fx >> 7);
 	return a + ((b - a) * fz >> 7);
@@ -681,8 +812,8 @@ int world_collide(int32_t *x, int32_t *z, int32_t radius, int32_t *nx, int32_t *
 	int hit = 0;
 	int ctx = (*x >> 4) / TILE_UNITS, ctz = (*z >> 4) / TILE_UNITS;
 	*nx = *nz = 0;
-	for (int i = 0; i < NUM_SLOTS; i++) {
-		Slot *s = &slots[i];
+	for (int i = 0; i < NUM_NEAR; i++) {
+		Slot *s = &near_slots[i];
 		if (s->state != SLOT_READY || tile_dist(s, ctx, ctz) > 1)
 			continue;
 		/* Circle centre relative to the tile, in 1/256 m. */

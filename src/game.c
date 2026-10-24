@@ -372,20 +372,24 @@ static int clip(int32_t *x0, int32_t *y0, int32_t *x1, int32_t *y1) {
 	return 1;
 }
 
+/* The minimap's lines, worked out every other frame and drawn every frame. */
+#define MAP_LINES 600
+static int16_t map_lines[MAP_LINES][4];
+static uint8_t map_cls[MAP_LINES];
+static int num_map_lines;
+
 static void map_segment(const RoadSeg *sg, void *arg) {
 	MapArg *a = arg;
 	int32_t x0, y0, x1, y1;
+	if (num_map_lines >= MAP_LINES)
+		return;
 	map_point(a, sg->x0, sg->z0, &x0, &y0);
 	map_point(a, sg->x1, sg->z1, &x1, &y1);
 	if (!clip(&x0, &y0, &x1, &y1))
 		return;
-	static const uint8_t col[3][3] = { { 150, 150, 150 }, { 220, 200, 120 }, { 240, 170, 80 } };
-	LINE_F2 *l = (LINE_F2 *)a->prim;
-	setLineF2(l);
-	setXY2(l, x0, y0, x1, y1);
-	setRGB0(l, col[sg->cls][0], col[sg->cls][1], col[sg->cls][2]);
-	addPrim(a->ot, l);
-	a->prim += sizeof(LINE_F2);
+	int16_t *l = map_lines[num_map_lines];
+	l[0] = x0; l[1] = y0; l[2] = x1; l[3] = y1;
+	map_cls[num_map_lines++] = sg->cls;
 }
 
 static uint8_t *dark_box(uint32_t *ot, uint8_t *prim, int x, int y, int w, int h) {
@@ -432,7 +436,20 @@ static uint8_t *minimap(const Car *car, const Camera *cam, uint32_t *ot, uint8_t
 		addPrim(ot, t);
 		a.prim += sizeof(TILE);
 	}
-	world_segments(CAR_TO_WORLD(car->x), CAR_TO_WORLD(car->z), 2, map_segment, &a);
+	static int frame;
+	if (!(frame++ & 1)) {
+		num_map_lines = 0;
+		world_segments(CAR_TO_WORLD(car->x), CAR_TO_WORLD(car->z), 2, map_segment, &a);
+	}
+	static const uint8_t col[3][3] = { { 150, 150, 150 }, { 220, 200, 120 }, { 240, 170, 80 } };
+	for (int i = 0; i < num_map_lines; i++) {
+		LINE_F2 *l = (LINE_F2 *)a.prim;
+		setLineF2(l);
+		setXY2(l, map_lines[i][0], map_lines[i][1], map_lines[i][2], map_lines[i][3]);
+		setRGB0(l, col[map_cls[i]][0], col[map_cls[i]][1], col[map_cls[i]][2]);
+		addPrim(ot, l);
+		a.prim += sizeof(LINE_F2);
+	}
 	return dark_box(ot, a.prim, MAP_X, MAP_Y, MAP_SIZE, MAP_SIZE);
 }
 
@@ -492,5 +509,11 @@ uint8_t *game_draw_hud(const Car *car, const Camera *cam, uint32_t *ot, uint8_t 
 	prim = dark_box(ot, prim, 0, 4, 320, fare_state == FARE_RIDE ? 40 : 28);
 	prim = dark_box(ot, prim, 0, 220, 236, 16);
 	/* Semi-transparency mode for the boxes: 50%. */
-	return tpage_abr(ot, prim, 0);
+	prim = tpage_abr(ot, prim, 0);
+	/* No texture window for the font (the city's faces set one). */
+	DR_TWIN *w = (DR_TWIN *)prim;
+	RECT none = { 0, 0, 0, 0 };
+	setTexWindow(w, &none);
+	addPrim(ot, w);
+	return prim + sizeof(DR_TWIN);
 }
