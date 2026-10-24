@@ -38,12 +38,41 @@ typedef struct {
 	uint8_t r, g, b;
 } Colour;
 
+/* A place passengers go to (on the nearest road), from OSM. */
+typedef struct {
+	int32_t x, z;       /* world units */
+	uint16_t name;
+	uint8_t kind;       /* PLACE_* */
+	uint8_t pad;
+} Place;
+#define PLACE_DESTINATION 0
+#define PLACE_FUEL        1
+#define PLACE_REPAIR      2
+
+/* A piece (<= 32 m) of drivable road, for the minimap and street names. */
+typedef struct {
+	int16_t x0, z0, x1, z1;   /* metres */
+	uint16_t name;            /* 0xffff = none */
+	uint8_t cls;              /* 0 minor, 1 secondary/tertiary, 2 primary+ */
+	uint8_t pad;
+} RoadSeg;
+
+extern const Place *places;
+extern int num_places;
+
 extern Colour fog_colour;
+extern Colour light;       /* scene light, 128 = full daylight (day/night) */
 extern char map_name[32];
 extern volatile int32_t tiles_loaded, tiles_drawn, faces_drawn, cd_errors;
 
 /* Reads the map header from the CD; returns 0 if MAP.BIN is missing. */
 int world_init(void);
+/* Name by id (upper case ASCII), "" if none. */
+const char *world_name(int id);
+/* Name of the street nearest to (x, z) within 25 m, or "". */
+const char *world_street_at(int32_t x, int32_t z);
+/* Calls fn for every road piece in the tiles within radius_tiles of (x, z). */
+void world_segments(int32_t x, int32_t z, int radius_tiles, void (*fn)(const RoadSeg *, void *), void *arg);
 /* Spawn point from the map (world units, heading 0..4095). */
 void world_spawn(int32_t *x, int32_t *z, int *heading);
 /* Map extent in world units. */

@@ -189,18 +189,19 @@ uint8_t *car_draw(const Car *car, const Camera *cam, uint32_t *ot, uint8_t *prim
 		int otz = (z[f[0]] + z[f[1]] + z[f[2]] + z[f[3]]) >> 6;
 		if (otz < 1) otz = 1;
 		if (otz > OT_LEN - 8) otz = OT_LEN - 8;
-		if (f[4]) {
+		int lr = f[4] & 2 ? 128 : light.r, lg = f[4] & 2 ? 128 : light.g, lb = f[4] & 2 ? 128 : light.b;
+		if (f[4] & 1) {
 			POLY_F3 *q = (POLY_F3 *)prims;
 			setPolyF3(q);
 			setXY3(q, a.vx, a.vy, b.vx, b.vy, cc.vx, cc.vy);
-			setRGB0(q, f[5], f[6], f[7]);
+			setRGB0(q, f[5] * lr >> 7, f[6] * lg >> 7, f[7] * lb >> 7);
 			addPrim(ot + otz, q);
 			prims += sizeof(POLY_F3);
 		} else {
 			POLY_F4 *q = (POLY_F4 *)prims;
 			setPolyF4(q);
 			setXY4(q, a.vx, a.vy, b.vx, b.vy, cc.vx, cc.vy, d.vx, d.vy);
-			setRGB0(q, f[5], f[6], f[7]);
+			setRGB0(q, f[5] * lr >> 7, f[6] * lg >> 7, f[7] * lb >> 7);
 			addPrim(ot + otz, q);
 			prims += sizeof(POLY_F4);
 		}

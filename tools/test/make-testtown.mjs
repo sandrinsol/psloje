@@ -37,6 +37,17 @@ for (let j = 0; j + 1 < N; j++) for (let i = 0; i + 1 < N; i++) {
   }
 }
 node(20 + 2 * STEP, 20 + 2 * STEP, { name: 'Test Square' });
+// Named places for fares, one fuel station and one mechanic (all made up).
+const PLACES = [
+  ['Test Hotel', { tourism: 'hotel' }], ['Test Cafe', { amenity: 'cafe' }], ['Test School', { amenity: 'school' }],
+  ['Test Market', { shop: 'supermarket' }], ['Test Clinic', { amenity: 'clinic' }], ['Test Bank', { amenity: 'bank' }],
+  ['Test Museum', { tourism: 'museum' }], ['Test Bakery', { shop: 'bakery' }],
+  ['Test Fuel', { amenity: 'fuel' }], ['Test Garage', { shop: 'car_repair' }],
+];
+PLACES.forEach(([name, tags], i) => {
+  const bx = 20 + (i % 4) * STEP + 40, bz = 20 + Math.floor(i / 4) * STEP + (i % 2 ? 6 : 74);
+  node(bx, bz, { name, ...tags });
+});
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 const tagXml = (t) => Object.entries(t).map(([k, v]) => `    <tag k="${esc(k)}" v="${esc(v)}"/>\n`).join('');
