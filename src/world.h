@@ -1,0 +1,61 @@
+/*
+ * The city: tiles streamed from MAP.BIN on the CD (made by tools/osm2map.mjs),
+ * drawn with the GTE, and the collision edges of its buildings.
+ *
+ * Units: 1 world unit = 1/16 m. X = east, Z = north, Y = down.
+ */
+#pragma once
+#include <stdint.h>
+#include <psxgte.h>
+
+#define UNIT             16          /* world units per metre */
+#define TILE_UNITS       1024        /* 64 m */
+#define MAX_TILE_VERTS   2400        /* must match tools/osm2map.mjs */
+#define TILE_SLOT_BYTES  (40 * 1024) /* must be >= the biggest tile */
+#define LOAD_RADIUS      2           /* tiles kept around the car: 5 x 5 */
+
+#define OT_LEN           2048
+/* The GTE gets the camera matrix scaled by GTE_SCALE: the picture is the same
+ * but depths (SZ) are GTE_SCALE times bigger. Needed because the GTE's divide
+ * overflows when SZ < H/2 (H = 200): points closer than that are squashed.
+ * Depth constants below are in those scaled units. */
+#define GTE_SCALE        7
+#define ZM(metres)       ((metres) * UNIT * GTE_SCALE)
+#define NEAR_Z           104         /* > H/2: about 0.93 m */
+#define TEX_DIST         ZM(50)      /* textured closer than this */
+#define FOG_START        ZM(55)
+#define FOG_END          ZM(120)
+
+typedef struct {
+	int32_t x, y, z;   /* world units */
+	int heading;       /* 4096 = full turn, 0 = north, clockwise */
+	int pitch;         /* positive = looking down */
+	MATRIX m;          /* world -> camera rotation (set by camera_update) */
+	MATRIX gm;         /* the same, times GTE_SCALE, for the GTE */
+} Camera;
+
+typedef struct {
+	uint8_t r, g, b;
+} Colour;
+
+extern Colour fog_colour;
+extern char map_name[32];
+extern volatile int32_t tiles_loaded, tiles_drawn, faces_drawn, cd_errors;
+
+/* Reads the map header from the CD; returns 0 if MAP.BIN is missing. */
+int world_init(void);
+/* Spawn point from the map (world units, heading 0..4095). */
+void world_spawn(int32_t *x, int32_t *z, int *heading);
+/* Map extent in world units. */
+void world_size(int32_t *w, int32_t *h);
+/* Keeps the tiles around (x, z) loaded: one CD read at a time, non-blocking.
+ * With wait != 0 it blocks until all of them are in (start of a level). */
+void world_stream(int32_t x, int32_t z, int wait);
+void camera_update(Camera *cam);
+/* Loads a rotation + translation into the GTE (see world.c for why not the macros). */
+void gte_load_matrix(const MATRIX *m);
+/* Adds the visible city to the ordering table. Returns the new prim pointer. */
+uint8_t *world_draw(const Camera *cam, uint32_t *ot, uint8_t *prims, uint8_t *prims_end);
+/* Pushes a circle (centre in 1/256 m, radius in 1/256 m) out of building
+ * walls. Returns 1 if it touched one; *nx, *nz = the push direction (4096 = 1). */
+int world_collide(int32_t *x, int32_t *z, int32_t radius, int32_t *nx, int32_t *nz);
