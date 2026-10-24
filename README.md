@@ -19,7 +19,13 @@ fps. See [data/README.md](data/README.md).
 2. Hand-drawn Vlora-style textures, shop fronts, dithering.
 3. Bright Mediterranean look: sky, sun, clouds, the bay's horizon.
 4. Pavements, kerbs, trees and palms, lamps, signs, parked cars, people.
-5. Landmarks: Independence Monument, Muradie Mosque, the flag square, the port.
+5. Landmarks, modelled from photos: the Independence Monument and the flag
+   square's banners, the Muradie Mosque, Teatri Petro Marko, the Independence
+   Museum. **Done.** Known buildings: schools in school colours, hospitals,
+   and 64 name signs (schools, hospitals, museums, town hall, churches,
+   mosques, banks, hotels). **Done.** Still to come: the stadium, the
+   university, Kanina castle, the port cranes, the lighthouse, the churches,
+   the town hall.
 6. Detailed textured W124 and a Driver-style camera with more views.
 7. Night: lit windows, street lamps, better headlights, neon.
 
@@ -95,6 +101,15 @@ From the data the converter takes:
   stations (`amenity=fuel`) and mechanics (`shop=car_repair`) for later.
 - **Minimap and street names**: the drivable roads and their `name=`. Albanian
   letters become plain capitals for the PS1 font (ë → E, ç → C).
+- **Landmarks**: `tools/landmarks.mjs` models them (from Wikimedia Commons
+  photos fetched with `tools/fetch-refs.py`; credits in
+  `data/landmark-refs.json`, the photos themselves are not in the game) and
+  the converter puts each where OpenStreetMap has it, in place of its plain
+  building, its front towards the street.
+- **Known buildings and signs**: schools, hospitals, hotels and the like
+  (from the building's tags, a named point inside it or the site around it)
+  get the look of their kind and a sign with their name (`tools/signs.mjs`)
+  on the side facing the street.
 - **Routes and the big map**: a graph of the drivable roads (junctions and
   dead ends as nodes) with `oneway=yes/-1`, roundabouts and motorways as
   one-way; service roads count double so routes prefer real streets. Plus a
@@ -166,6 +181,8 @@ Generated files, committed so the build doesn't need to regenerate them:
   route: a shortest-path tree grown backwards from the target over a few
   frames, then followed from wherever the taxi is.
 - `src/bigmap.c`: the full-screen map (Triangle).
+- `tools/maketex.mjs`: the city's textures (CITY.TIM: two 8-bit pages); the
+  name signs are a third, 4-bit page made by the converter.
 
 Two PS1 details worth knowing:
 

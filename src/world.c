@@ -37,7 +37,7 @@ typedef struct {
 typedef struct {
 	uint16_t v[4];
 	uint8_t u0, v0, u1, v1;
-	uint8_t texlayer;     /* texture id (15 = none) | flat layer << 4 */
+	uint8_t texlayer;     /* texture id (TEX_NONE = none) | flat layer << 6 */
 	uint8_t r, g, b;
 } Face;
 
@@ -95,8 +95,18 @@ static const uint16_t *name_offsets;
 static const char *name_text;
 static int num_names;
 
-static uint16_t tpage;
-static uint16_t clut;
+/* Textures: 3 texture pages of 16 (64 x 64) side by side from
+ * (CITY_TPAGE_X, CITY_TPAGE_Y): the city's own (CITY.TIM, tools/maketex.mjs,
+ * 8-bit) in the first two, the map's name signs (MAP.BIN's global section,
+ * 4-bit, 4 signs a slot) in the third. */
+#define SIGN_TEX 32
+static uint16_t tpages[3];
+static uint16_t clut, sign_clut;
+static int num_sign_tex;
+
+static inline int textured(int tex) {
+	return tex < NUM_TEXTURES || (tex >= SIGN_TEX && tex < SIGN_TEX + num_sign_tex);
+}
 
 /* Per-tile transformed vertices. */
 static DVECTOR sxy[MAX_TILE_VERTS + 2];
@@ -121,21 +131,28 @@ static int cd_read(int lba, int sectors, void *buf) {
 	return 0;
 }
 
-extern const uint32_t city_tim[];
-
 int world_init(void) {
 	static uint32_t sector[SECTOR / 4];
 	CdlFILE file;
 	TIM_IMAGE tim;
 
-	GetTimInfo(city_tim, &tim);
+	tpages[0] = getTPage(1, 0, CITY_TPAGE_X, CITY_TPAGE_Y);
+	tpages[1] = getTPage(1, 0, CITY_TPAGE_X + 128, CITY_TPAGE_Y);
+	tpages[2] = getTPage(0, 0, CITY_TPAGE_X + 256, CITY_TPAGE_Y);   /* signs: 4-bit */
+	clut = getClut(CITY_CLUT_X, CITY_CLUT_Y);
+	sign_clut = getClut(CITY_CLUT_X, CITY_CLUT_Y + 1);
+
+	CdInit();
+	/* The city's textures, through the (still empty) tile buffers. */
+	if (!CdSearchFile(&file, "\\CITY.TIM;1") || file.size > sizeof(near_data))
+		return 0;
+	if (!cd_read(CdPosToInt(&file.pos), (file.size + SECTOR - 1) / SECTOR, near_data))
+		return 0;
+	GetTimInfo((const uint32_t *)near_data, &tim);
 	LoadImage(tim.prect, tim.paddr);
 	LoadImage(tim.crect, tim.caddr);
 	DrawSync(0);
-	tpage = getTPage(1, 0, CITY_TPAGE_X, CITY_TPAGE_Y);
-	clut = getClut(CITY_CLUT_X, CITY_CLUT_Y);
 
-	CdInit();
 	if (!CdSearchFile(&file, "\\MAP.BIN;1"))
 		return 0;
 	map_lba = CdPosToInt(&file.pos);
@@ -167,6 +184,17 @@ int world_init(void) {
 		p += num_places * sizeof(Place);
 		name_offsets = (const uint16_t *)p;
 		name_text = (const char *)(p + num_names * 2);
+		/* Name signs: a 16-colour CLUT and a 4-bit atlas, 4 signs a texture slot. */
+		int nsigns = g[2];
+		if (nsigns && g[3]) {
+			const uint16_t *s = (const uint16_t *)global_data + g[3] * 2;
+			num_sign_tex = (nsigns + 3) / 4;
+			RECT c = { CITY_CLUT_X, CITY_CLUT_Y + 1, 16, 1 };
+			RECT img = { CITY_TPAGE_X + 256, CITY_TPAGE_Y, 64, (num_sign_tex + 3) / 4 * 64 };
+			LoadImage(&c, (const uint32_t *)s);
+			LoadImage(&img, (const uint32_t *)(s + 16));
+			DrawSync(0);
+		}
 	}
 	/* The road graph (routes, the big map) follows them. */
 	if (header.graph_sectors && header.graph_sectors * SECTOR <= GRAPH_BYTES) {
@@ -412,9 +440,9 @@ static inline void fogged(uint8_t *out, const uint8_t *c, int z) {
 /* The colour a face has without its texture: the texture's average tinted
  * by the face colour (128 = unchanged). */
 static void base_colour(const Face *f, uint8_t *c) {
-	int tex = f->texlayer & 15;
+	int tex = f->texlayer & 63;
 	int r = f->r, g = f->g, b = f->b;
-	if (tex < NUM_TEXTURES) {
+	if (tex < NUM_TEXTURES) {   /* signs: the face colour is the sign's */
 		r = texture_avg[tex][0] * r >> 7;
 		g = texture_avg[tex][1] * g >> 7;
 		b = texture_avg[tex][2] * b >> 7;
@@ -465,7 +493,7 @@ static inline int too_big(const DVECTOR *p, int n) {
 /* smooth: Gouraud fog per corner (the ground, where steps would show); else
  * one fog value per face (buildings: cheaper, and small on screen). */
 static void emit(const Face *f, DVECTOR *p, int32_t *z, int u0, int v0, int u1, int v1, int tri, uint32_t *ot, int smooth) {
-	int tex = f->texlayer & 15;
+	int tex = f->texlayer & 63;
 	int zmax = z[0];
 	for (int i = 1; i < (tri ? 3 : 4); i++) if (z[i] > zmax) zmax = z[i];
 
@@ -482,15 +510,15 @@ static void emit(const Face *f, DVECTOR *p, int32_t *z, int u0, int v0, int u1, 
 	if (prim + sizeof(POLY_GT4) > prim_end)
 		return;
 
-	if (tex < NUM_TEXTURES && zmax < TEX_DIST && !tri) {
+	if (textured(tex) && zmax < TEX_DIST && !tri) {
 		POLY_FT4 *q = (POLY_FT4 *)prim;
 		setPolyFT4(q);
 		setXY4(q, p[0].vx, p[0].vy, p[1].vx, p[1].vy, p[2].vx, p[2].vy, p[3].vx, p[3].vy);
-		int tu = (tex & 1) * 64, tv = (tex >> 1) * 64;
+		int tu = (tex & 3) * 64, tv = (tex >> 2 & 3) * 64;
 		setUV4(q, u0, v0, u1, v0, u0, v1, u1, v1);   /* the texture window picks the texture */
 		setRGB0(q, f->r * light.r >> 7, f->g * light.g >> 7, f->b * light.b >> 7);
-		q->tpage = tpage;
-		q->clut = clut;
+		q->tpage = tpages[tex >> 4];
+		q->clut = tex >= SIGN_TEX ? sign_clut : clut;
 		addPrim(ot, q);
 		prim += sizeof(POLY_FT4);
 		/* Texture window: this face's 64 x 64 texture repeats across it (UVs
@@ -564,7 +592,7 @@ static inline uint32_t *ot_slot(const Face *f, int flat, int32_t *z, int n) {
 		if (z[i] > zmax) zmax = z[i];
 	}
 	int avg = n == 4 ? sum >> 2 : sum / 3;
-	int layer = f->texlayer >> 4;
+	int layer = f->texlayer >> 6;
 	int otz = flat ? ((layer == 0 ? zmax : avg) >> 4) + 3 - layer : avg >> 4;
 	if (otz < 1) otz = 1;
 	if (otz > OT_LEN - 8) otz = OT_LEN - 8;
@@ -601,7 +629,7 @@ static void draw_split(const Face *f, int flat, const SVECTOR *c, int u0, int v0
 	int ok = nearc == 0;
 	for (int i = 0; ok && i < 4; i++) ok = on_screen(p[i].vx, p[i].vy);
 	if (ok) ok = !too_big(p, 4);
-	if (ok && depth < 2 && (f->texlayer & 15) < NUM_TEXTURES && z[0] < WARP_DIST && extent(p, 4) > WARP_SIZE)
+	if (ok && depth < 2 && textured(f->texlayer & 63) && z[0] < WARP_DIST && extent(p, 4) > WARP_SIZE)
 		ok = 0;   /* close and big: split to keep the texture from warping */
 	if (ok) {
 		if (!front_facing(p[0], p[1], p[2]) && !front_facing(p[1], p[3], p[2]))
@@ -679,7 +707,7 @@ static void draw_faces(const Face *f, int n, const SVECTOR *v, int flat) {
 			continue;   /* off screen */
 		int w = xmax - xmin, h = ymax - ymin;
 		if (xmin <= -1000 || xmax >= 1000 || ymin <= -1000 || ymax >= 1000 || w > 1000 || h > 500 ||
-		    (!tri && (f->texlayer & 15) < NUM_TEXTURES && z[0] < WARP_DIST && (w > WARP_SIZE || h > WARP_SIZE))) {
+		    (!tri && textured(f->texlayer & 63) && z[0] < WARP_DIST && (w > WARP_SIZE || h > WARP_SIZE))) {
 			/* Too big for the GPU, or close and big enough for the texture to warp. */
 			SVECTOR c[4] = { v[i0], v[i1], v[i2], v[i3] };
 			draw_split(f, flat, c, f->u0, f->v0, f->u1, f->v1, 0);

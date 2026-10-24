@@ -41,8 +41,6 @@ if(PSN00BSDK_TARGET STREQUAL "mipsel-linux-gnu")
 		target_sources(game PRIVATE src/libgcc_mips1.c)
 	endif()
 endif()
-# City textures (tools/maketex.mjs).
-psn00bsdk_target_incbin(game PRIVATE city_tim assets/city.tim)
 
 # The city: data/vlora.osm (an OpenStreetMap export) when it's there, else the
 # made-up test town. MAP_OSM / MAP_SPAWN / MAP_NAME override.
@@ -66,7 +64,8 @@ add_custom_command(
 	OUTPUT  map.bin map-report.json
 	COMMAND ${NODE} "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs" "${MAP_OSM}" map.bin
 	        --spawn "${MAP_SPAWN}" --name "${MAP_NAME}" --report map-report.json ${MAP_ARGS}
-	DEPENDS "${MAP_OSM}" ${MAP_DEPS} "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs"
+	DEPENDS "${MAP_OSM}" ${MAP_DEPS} "${PROJECT_SOURCE_DIR}/tools/osm2map.mjs" "${PROJECT_SOURCE_DIR}/tools/landmarks.mjs"
+	        "${PROJECT_SOURCE_DIR}/tools/signs.mjs" "${PROJECT_SOURCE_DIR}/tools/maketex.mjs"
 	COMMENT "Converting ${MAP_OSM} to MAP.BIN"
 	VERBATIM
 )
@@ -76,5 +75,5 @@ psn00bsdk_add_cd_image(
 	iso      # Target name
 	game     # Output file name (= game.bin + game.cue)
 	iso.xml  # Path to config file
-	DEPENDS game map system.cnf ${CMAKE_BINARY_DIR}/map.bin   # the file too: rebuild the disc when only the map changes
+	DEPENDS game map system.cnf ${CMAKE_BINARY_DIR}/map.bin ${PROJECT_SOURCE_DIR}/assets/city.tim   # the file too: rebuild the disc when only the map changes
 )

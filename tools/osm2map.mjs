@@ -39,7 +39,7 @@
 //           u16 ngroups, u16 nsegs, u16 nflatVerts, u16 pad
 //           (vertices: the flat faces' first, then each group's own range)
 //           verts  nverts x { i16 x, y, z, pad }
-//           faces  nfaces x { u16 v[4], u8 u0, v0, u1, v1, u8 tex|layer<<4,
+//           faces  nfaces x { u16 v[4], u8 u0, v0, u1, v1, u8 tex|layer<<6 (tex 63: none),
 //                             u8 r, g, b }   (v[3] == 0xffff: triangle)
 //           edges  nedges x { i16 x0, z0, x1, z1 }
 //           height 9 x 9 i16: ground Y every 8 m (row = z), for the car
@@ -57,6 +57,8 @@
 //           after the global section
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { LANDMARKS, TEX as TEXTURE_IDS } from './landmarks.mjs';
+import { signLines, signAtlas, SIGN_PALETTE, to15 as sign15 } from './signs.mjs';
 
 const UNIT = 16;                 // units per metre
 const TILE_M = 64;
@@ -77,8 +79,8 @@ const MAX_TILE_VERTS = 2400;     // must match MAX_TILE_VERTS in src/world.h
 const MAX_TILE_BYTES = 20 * 1024; // must match TILE_SLOT_BYTES in src/world.h
 const MAX_FAR_BYTES = 6 * 1024;   // must match FAR_SLOT_BYTES in src/world.h
 
-// Texture ids: must match the order in tools/maketex.mjs.
-const TEX = { asphalt: 0, paving: 1, wallA: 2, wallB: 3, wallC: 4, ground: 5, grass: 6, sand: 7, none: 15 };
+// Texture ids (by name, in tools/maketex.mjs's order; 63 = none).
+const TEX = TEXTURE_IDS;
 // Flat layers (drawn back to front): ground, areas, footways, roads.
 const LAYER = { ground: 0, area: 1, foot: 2, road: 3 };
 
@@ -87,7 +89,8 @@ const LAYER = { ground: 0, area: 1, foot: 2, road: 3 };
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
 const spawnName = opt('--spawn');
-const spawnRoad = opt('--spawn-road');   // start on this street (the one the place faces)
+const spawnRoad = opt('--spawn-road');
+const noLandmarks = args.includes('--no-landmarks') && args.splice(args.indexOf('--no-landmarks'), 1);   // start on this street (the one the place faces)
 const reportPath = opt('--report');
 const mapLabel = opt('--name') || 'OSM MAP';
 const extraPaths = (opt('--extra') || '').split(',').filter(Boolean);
@@ -255,6 +258,9 @@ function guessLevels(tags, poly, id) {
   else if (HOUSE.has(type) || area < 90) { kind = 'house'; levels = 1 + (r > 0); }
   else if (['industrial', 'warehouse', 'hangar'].includes(type)) { kind = 'industrial'; levels = 2; }
   else if (['mosque', 'church', 'chapel'].includes(type)) { kind = 'religious'; levels = 3; }
+  else if (type === 'kindergarten') { kind = 'school'; levels = 1 + (r > 1); }
+  else if (['school', 'college', 'university'].includes(type)) { kind = 'school'; levels = 2 + (r > 0) + (type === 'university'); }
+  else if (type === 'hospital') { kind = 'hospital'; levels = 3 + r; }
   else if (area < 180) { kind = 'small block'; levels = 2 + r; }
   else if (area > 250 && coastAt(cx, cz).d < 150) { kind = 'seafront tower'; levels = 9 + r + (area > 700) * 2; }
   else if (area > 250 && mainRoadDist(cx, cz) < 35) { kind = 'boulevard block'; levels = 7 + r; }
@@ -285,7 +291,11 @@ function building(poly, tags, id, isPart) {
   const ground = Math.min(...poly.map(([x, z]) => elev(x, z)));
   const wallCol = parseColour(tags['building:colour'] || tags.colour);
   if (wallCol) stats.colouredBuildings++;
-  const wallTex = (tags['building:colour'] || tags.colour) ? TEX.wallA : [TEX.wallA, TEX.wallB, TEX.wallC][hash(id) % 3];
+  const btype = tags.building || '';
+  const wallTex = ['school', 'kindergarten', 'college', 'university'].includes(btype) ? TEX.school : btype === 'hospital' ? TEX.hospital
+    : (tags['building:colour'] || tags.colour) ? TEX.wallA : [TEX.wallA, TEX.wallB, TEX.wallC][hash(id) % 3];
+  // Schools come in a few pastel colours.
+  const schoolTint = wallTex === TEX.school && !wallCol ? [[128, 128, 128], [136, 118, 112], [120, 128, 104], [138, 124, 96]][hash(id + 's') % 4] : null;
   const roofCol = parseColour(tags['roof:colour']) || [[150, 80, 60], [130, 130, 128], [170, 160, 150]][hash(id + 'r') % 3];
   // Each building is a group the game culls in one test (bounding sphere),
   // with fine faces (8 m x 2-floor textured panels) for up close and coarse
@@ -310,7 +320,7 @@ function building(poly, tags, id, isPart) {
     // Sun from the south-west, a bit above: walls facing it are brighter.
     const nx = (z1 - z0) / len, nz = -(x1 - x0) / len;
     const light = 0.72 + 0.28 * Math.max(-1, Math.min(1, -nx * 0.6 - nz * 0.8));
-    const base = wallCol ? wallCol.map((c) => c / 255 * 160) : [128, 128, 128];
+    const base = wallCol ? wallCol.map((c) => c / 255 * 160) : schoolTint || [128, 128, 128];
     const rgb = base.map((c) => clampByte(c * light));
     const cols = Math.max(1, Math.ceil(len / (PANEL_W * MAX_REPEAT) - 0.05));
     group.coarse.push({ v: [vert(t, x0, ground + h, z0), vert(t, x1, ground + h, z1), vert(t, x0, ground + minH, z0), vert(t, x1, ground + minH, z1)], uv: [0, 0, 63, 63], tex: wallTex, layer: 0, rgb });
@@ -337,6 +347,8 @@ function building(poly, tags, id, isPart) {
       }
     }
   }
+  const k = !isPart && known.get(id);
+  if (k && k.name) signQueue.push({ poly, group, t, ground, h, minH, id, kind: k.kind, name: k.name, roofAt: group.fine.length });
   // Roof (seen from above: clockwise on screen = counter-clockwise in X/Z).
   for (const [a, bb, c] of triangulate(poly)) {
     group.nroof = (group.nroof || 0) + 1;
@@ -517,9 +529,119 @@ function mainRoadDist(x, z) {
   return best;
 }
 
+// Landmarks (tools/landmarks.mjs): found by name; their own buildings are
+// replaced by the models (placed further down, once the streets are known).
+const landmarkHits = (noLandmarks ? [] : LANDMARKS).map((l) => {
+  const w = [...ways.values()].find((w) => w.tags.name === l.name && closed(w));
+  if (w) return { l, way: w, pts: ring(w) };
+  const n = [...nodeTags].find(([, t]) => t.name === l.name);
+  if (n) return { l, pts: [toXZ(n[0])] };
+  console.warn(`landmark "${l.name}" not found`);
+  return null;
+}).filter(Boolean);
+const landmarkWays = new Set(landmarkHits.filter((h) => h.way).map((h) => h.way.id));
+// Other buildings in the same place (e.g. Microsoft's footprint of the same
+// mosque) go too: anything whose centre is within 2 m of a landmark's
+// outline (its OSM outline, or its model's for one on a point).
+const landmarkAreas = landmarkHits.map(({ l, pts }) => {
+  if (pts.length > 2) return pts;
+  const { collide } = l.build({ w: 0, d: 0 });
+  const b = (l.facing || 0) * Math.PI / 180, s = -Math.sin(b), c = -Math.cos(b), [cx, cz] = pts[0];
+  return (collide || []).map(([x, z]) => [cx + x * c + z * s, cz - x * s + z * c]);
+}).filter((p) => p.length > 2);
+function nearLandmark(poly) {
+  const x = poly.reduce((s, p) => s + p[0], 0) / poly.length, z = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+  return landmarkAreas.some((area) => {
+    let inside = false;
+    for (let i = 0, j = area.length - 1; i < area.length; j = i++) {
+      const [xi, zi] = area[i], [xj, zj] = area[j];
+      if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+      const dx = xj - xi, dz = zj - zi, l2 = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((x - xi) * dx + (z - zi) * dz) / l2));
+      if (Math.hypot(xi + dx * u - x, zi + dz * u - z) < 2) return true;
+    }
+    return inside;
+  });
+}
+stats.replacedByLandmarks = 0;
+
+// Known buildings (schools, hospitals, hotels...): from the building's own
+// tags or a named point inside it. They get the look of their kind and,
+// with a name, a sign over the door on the street side.
+const knownKind = (t) => {
+  const a = t.amenity, b = t.building, tr = t.tourism;
+  if (['school', 'college', 'kindergarten'].includes(a) || ['school', 'kindergarten', 'college'].includes(b)) return 'school';
+  if (a === 'university' || b === 'university') return 'university';
+  if (['hospital', 'clinic', 'doctors'].includes(a) || b === 'hospital') return 'hospital';
+  if (a === 'place_of_worship' || ['church', 'mosque', 'chapel', 'cathedral'].includes(b)) return 'worship';
+  if (['museum'].includes(tr) || ['theatre', 'library', 'arts_centre', 'cinema'].includes(a)) return 'culture';
+  if (['townhall', 'courthouse'].includes(a) || t.office === 'government' || ['government', 'civic'].includes(b)) return 'government';
+  if (a === 'police') return 'police';
+  if (a === 'post_office') return 'post';
+  if (['hotel', 'hostel', 'guest_house'].includes(tr) || b === 'hotel') return 'hotel';
+  if (a === 'bank') return 'bank';
+  return null;
+};
+const known = new Map();   // building way id -> { kind, name }
+const insidePoly = (x, z, p) => { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > z) !== (p[j][1] > z) && x < ((p[j][0] - p[i][0]) * (z - p[i][1])) / (p[j][1] - p[i][1]) + p[i][0]) c = !c; return c; };
+{
+  const grid = new Map(), cell = 64;
+  for (const w of ways.values()) {
+    if (!w.tags.building || !closed(w)) continue;
+    const kind = knownKind(w.tags);
+    if (kind) known.set(w.id, { kind, name: w.tags.name || '' });
+    const p = ring(w);
+    if (p.length < 3) continue;
+    const xs = p.map((q) => q[0]), zs = p.map((q) => q[1]);
+    for (let cz = Math.floor(Math.min(...zs) / cell); cz <= Math.floor(Math.max(...zs) / cell); cz++)
+      for (let cx = Math.floor(Math.min(...xs) / cell); cx <= Math.floor(Math.max(...xs) / cell); cx++) {
+        const k = cx + ',' + cz;
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k).push([w.id, p]);
+      }
+  }
+  // Sites (school grounds, hospital areas): every building in them takes the
+  // look, the biggest the name.
+  for (const w of ways.values()) {
+    const kind = !w.tags.building && closed(w) && knownKind(w.tags);
+    if (!kind) continue;
+    const site = ring(w);
+    if (site.length < 3) continue;
+    const xs = site.map((q) => q[0]), zs = site.map((q) => q[1]);
+    const inSite = new Map();
+    for (let cz = Math.floor(Math.min(...zs) / cell); cz <= Math.floor(Math.max(...zs) / cell); cz++)
+      for (let cx = Math.floor(Math.min(...xs) / cell); cx <= Math.floor(Math.max(...xs) / cell); cx++)
+        for (const [wid, p] of grid.get(cx + ',' + cz) || []) {
+          const mx = p.reduce((s, q) => s + q[0], 0) / p.length, mz = p.reduce((s, q) => s + q[1], 0) / p.length;
+          if (!inSite.has(wid) && insidePoly(mx, mz, site)) inSite.set(wid, Math.abs(area2(p)));
+        }
+    if (!inSite.size) continue;
+    const biggest = [...inSite].sort((a, b) => b[1] - a[1])[0][0];
+    for (const wid of inSite.keys()) {
+      const k = known.get(wid);
+      if (k && k.name) continue;
+      known.set(wid, { kind, name: wid === biggest ? w.tags.name || '' : '' });
+    }
+  }
+  for (const [id, t] of nodeTags) {
+    const kind = knownKind(t);
+    if (!kind || !t.name) continue;
+    const pt = toXZ(id);
+    if (!pt) continue;
+    for (const [wid, p] of grid.get(Math.floor(pt[0] / cell) + ',' + Math.floor(pt[1] / cell)) || [])
+      if (insidePoly(pt[0], pt[1], p)) { const k = known.get(wid); if (!k || !k.name) known.set(wid, { kind, name: t.name }); break; }
+  }
+}
+const KIND_BUILDING = { school: 'school', university: 'university', hospital: 'hospital' };
+const signQueue = [];
+
 for (const w of ways.values()) {
   const t = w.tags;
-  if (t.building && t.building !== 'no' && closed(w)) building(ring(w), t, w.id, false);
+  if (landmarkWays.has(w.id)) continue;
+  if ((t.building || t['building:part']) && closed(w) && landmarkAreas.length && nearLandmark(ring(w))) { stats.replacedByLandmarks++; continue; }
+  if (t.building && t.building !== 'no' && closed(w)) {
+    const k = known.get(w.id);
+    building(ring(w), k && t.building === 'yes' && KIND_BUILDING[k.kind] ? { ...t, building: KIND_BUILDING[k.kind] } : t, w.id, false);
+  }
   else if (t['building:part'] && t['building:part'] !== 'no' && closed(w)) building(ring(w), t, w.id, true);
   else if (closed(w) && areaKind(t)) flatArea(ring(w), LAYER.area, AREA_COLOURS[areaKind(t)]);
   else if (t.highway && t.area !== 'yes') road(wayPts(w), t);
@@ -619,13 +741,151 @@ function nearestRoad([x, z], among = drivable) {
   if (best) { spawn = best.p; spawn.heading = best.heading; }
 }
 
+// ---- Landmarks ------------------------------------------------------------------------
+
+// Smallest rectangle around an outline: { cx, cz, angle (of the long side), w (long), d }.
+function orientedBox(pts) {
+  let best = null;
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, z0] = pts[i], [x1, z1] = pts[(i + 1) % pts.length];
+    const a = Math.atan2(z1 - z0, x1 - x0), c = Math.cos(a), s = Math.sin(a);
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const [x, z] of pts) { const u = x * c + z * s, v = -x * s + z * c; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+    const area = (u1 - u0) * (v1 - v0);
+    if (!best || area < best.area) {
+      const uc = (u0 + u1) / 2, vc = (v0 + v1) / 2;
+      best = { area, cx: uc * c - vc * s, cz: uc * s + vc * c, angle: a, w: u1 - u0, d: v1 - v0 };
+    }
+  }
+  if (best.d > best.w) { best.angle += Math.PI / 2; [best.w, best.d] = [best.d, best.w]; }
+  return best;
+}
+
+// Nearest point on any highway with this name (footways included).
+function nearestNamedWay([x, z], name) {
+  let best = null;
+  for (const w of ways.values()) {
+    if (!w.tags.highway || w.tags.name !== name) continue;
+    const p = wayPts(w);
+    for (let i = 0; i + 1 < p.length; i++) {
+      const [x0, z0] = p[i], [x1, z1] = p[i + 1], dx = x1 - x0, dz = z1 - z0, l2 = dx * dx + dz * dz || 1;
+      const u = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / l2)), px = x0 + dx * u, pz = z0 + dz * u, d = Math.hypot(px - x, pz - z);
+      if (!best || d < best.d) best = { d, p: [px, pz] };
+    }
+  }
+  return best;
+}
+
+const signs = [];   // name signs (landmarks' first, then known buildings')
+const landmarkStats = [];
+function placeLandmark({ l, pts }) {
+  let cx, cz, size = { w: 0, d: 0 }, front;   // front: unit vector the front looks along
+  if (l.place === 'footprint' && pts.length > 2) {
+    const box = orientedBox(pts);
+    ({ cx, cz } = box);
+    const short = l.frontSide === 'short';
+    size = short ? { w: box.d, d: box.w } : { w: box.w, d: box.d };
+    // The front faces the nearest street (or the one named): one of the two
+    // normals of the long (or short) sides.
+    const nx = short ? Math.cos(box.angle) : -Math.sin(box.angle), nz = short ? Math.sin(box.angle) : Math.cos(box.angle);
+    const road = l.frontRoad ? nearestNamedWay([cx, cz], l.frontRoad) : nearestRoad([cx, cz]);
+    const toRoad = road ? (road.p[0] - cx) * nx + (road.p[1] - cz) * nz : 1;
+    front = toRoad >= 0 ? [nx, nz] : [-nx, -nz];
+  } else {
+    cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    cz = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    const b = (l.facing || 0) * Math.PI / 180;
+    front = [Math.sin(b), Math.cos(b)];
+  }
+  // Model -> world: local -z is the front, local x its right (Model.add's turn).
+  const s = -front[0], c = -front[1];
+  const toWorld = ([x, y, z]) => [cx + x * c + z * s, y, cz - x * s + z * c];
+  const { model, far, collide } = l.build(size);
+  const outline = (collide || []).map(([x, z]) => toWorld([x, 0, z]));
+  const ground = Math.min(elev(cx, cz), ...outline.map(([x, , z]) => elev(x, z)));
+  const t = tileAt(cx, cz), ft = farTileAt(cx, cz);
+  vertScope = `lm:${l.key}:`;
+  const all = model.faces.flatMap((f) => f.p).map(toWorld);
+  const r = Math.max(...all.map(([x, , z]) => Math.hypot(x - cx, z - cz))) + 0.5;
+  const top = ground + Math.max(...all.map((p) => p[1]));
+  const faces = (m, tile) => m.faces.map((f) => {
+    const p = f.p.map(toWorld);
+    // Outward normal (u x v of the first corner's edges) for the sun's shading.
+    const u = p[1].map((v, i) => v - p[0][i]), v = p[2].map((v, i) => v - p[0][i]);
+    let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const len = Math.hypot(...n) || 1;
+    n = n.map((x) => x / len);
+    const light = 0.72 + 0.28 * Math.max(-1, Math.min(1, -n[0] * 0.6 - n[2] * 0.8 + n[1] * 0.9));
+    const vs = p.map(([x, y, z]) => vert(tile, x, ground + y, z));
+    if (f.sign) {
+      // Its own sign in the atlas (once, for the near model).
+      if (f.signIndex === undefined) { f.signIndex = signs.length; signs.push({ lines: signLines(f.sign.text), kind: f.sign.kind, at: [Math.round(cx), Math.round(cz)] }); }
+      const i = f.signIndex;
+      return { v: vs, uv: [0, (i & 3) * 16, 63, (i & 3) * 16 + 15], tex: 32 + (i >> 2), layer: 0, rgb: [128, 128, 128] };
+    }
+    return { v: vs.length === 3 ? [...vs, 0xffff] : vs, uv: f.uv, tex: f.tex, layer: 0, rgb: f.rgb.map((x) => clampByte(x * light)) };
+  });
+  const fine = faces(model, t), coarse = far ? faces(far, t) : fine;
+  t.groups.push({ fine, coarse, cx, cz, r, top, bottom: ground, nroof: 0 });
+  ft.groups.push({ fine: far ? faces(far, ft) : faces(model, ft), coarse: null, cx, cz, r, top, bottom: ground, nroof: 0 });
+  ft.groups[ft.groups.length - 1].coarse = ft.groups[ft.groups.length - 1].fine;
+  vertScope = '';
+  // Collision: the outline, in <= 32 m pieces, counter-clockwise.
+  if (outline.length > 2 && area2(outline.map(([x, , z]) => [x, z])) < 0) outline.reverse();
+  for (let i = 0; i < outline.length; i++) {
+    const [ax, , az] = outline[i], [bx, , bz] = outline[(i + 1) % outline.length];
+    const et = tileAt((ax + bx) / 2, (az + bz) / 2);
+    et.edges.push([ax, az, bx, bz].map((v, j) => Math.round((v - (j % 2 ? et.tz : et.tx) * TILE_M) * UNIT)));
+  }
+  landmarkStats.push({ key: l.key, at: [Math.round(cx), Math.round(cz)], faces: model.faces.length, farFaces: far ? far.faces.length : 0, size: [+size.w.toFixed(1), +size.d.toFixed(1)] });
+}
+for (const h of landmarkHits) if (inside(h.pts[0][0], h.pts[0][1])) placeLandmark(h);
+
+// ---- Name signs ------------------------------------------------------------------------
+// The most useful first (schools...), at most 64 (16 texture slots).
+const SIGN_ORDER = ['school', 'university', 'hospital', 'culture', 'government', 'police', 'worship', 'post', 'bank', 'hotel'];
+const MAX_SIGNS = 64;
+for (const q of signQueue.sort((a, b) => SIGN_ORDER.indexOf(a.kind) - SIGN_ORDER.indexOf(b.kind))) {
+  if (signs.length >= MAX_SIGNS) break;
+  const plain = q.name.replace(/&quot;/g, '"').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[“”„]/g, '"').replace(/[^\x20-\x7e]/g, '').toUpperCase().trim();
+  const lines = signLines(plain);
+  if (!lines.length || !lines[0]) continue;
+  // The wall facing the nearest street, at least 4.6 m long.
+  const cx = q.poly.reduce((s, p) => s + p[0], 0) / q.poly.length, cz = q.poly.reduce((s, p) => s + p[1], 0) / q.poly.length;
+  const road = nearestRoad([cx, cz]);
+  if (!road) continue;
+  const toRoad = [road.p[0] - cx, road.p[1] - cz], tl = Math.hypot(...toRoad) || 1;
+  let best = null;
+  for (let i = 0; i < q.poly.length; i++) {
+    const [x0, z0] = q.poly[i], [x1, z1] = q.poly[(i + 1) % q.poly.length];
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    if (len < 4.6) continue;
+    const nx = (z1 - z0) / len, nz = -(x1 - x0) / len;   // outward (outline counter-clockwise)
+    const score = (nx * toRoad[0] + nz * toRoad[1]) / tl;
+    if (!best || score > best.score) best = { score, x0, z0, x1, z1, len, nx, nz };
+  }
+  if (!best) continue;
+  const i = signs.length, slot = i >> 2, band = i & 3;
+  signs.push({ lines, kind: q.kind, at: [Math.round(cx), Math.round(cz)] });
+  const ex = (best.x1 - best.x0) / best.len, ez = (best.z1 - best.z0) / best.len;
+  const mx = (best.x0 + best.x1) / 2 + best.nx * 0.12, mz = (best.z0 + best.z1) / 2 + best.nz * 0.12;
+  const y0 = q.ground + Math.max(q.minH + 0.3, Math.min(3.2, q.h - 1.4)), y1 = y0 + 1;
+  vertScope = `b${q.id}:`;
+  const t = q.t;
+  const face = { v: [vert(t, mx - ex * 2, y1, mz - ez * 2), vert(t, mx + ex * 2, y1, mz + ez * 2), vert(t, mx - ex * 2, y0, mz - ez * 2), vert(t, mx + ex * 2, y0, mz + ez * 2)],
+    uv: [0, band * 16, 63, band * 16 + 15], tex: 32 + slot, layer: 0, rgb: [128, 128, 128] };
+  q.group.fine.splice(q.roofAt, 0, face);   // before the roof faces (they must stay last)
+  vertScope = '';
+}
+stats.signs = signs.length;
+
 // ---- Places, minimap roads, names ------------------------------------------------
 //
-// Global section (read into RAM once): u16 nplaces, nsegs, nnames, ntiles,
+// Global section (read into RAM once): u16 nplaces, nnames, nsigns, signs offset / 4,
 //   places  nplaces x { i32 x, z (world units, on the nearest road), u16 name, u8 kind, u8 pad }
-//   buckets ntiles x { u16 first, count }   (segments sorted by tile)
-//   segs    nsegs x { i16 x0, z0, x1, z1 (metres), u16 name (0xffff none), u8 class, u8 pad }
 //   names   nnames x u16 offset (from the start of the name text), then the text (NUL-ended)
+//   signs   (at the offset) 16 x u16 CLUT, then the 4-bit sign atlas (tools/signs.mjs),
+//           128 bytes a row, 64 rows per 4 slots
 // Names are in the PS1 font's character set: upper case ASCII (e and c with
 // accents, as in Albanian, become E and C).
 
@@ -800,19 +1060,26 @@ function graphBlob() {
 function globalBlob() {
   const text = names.map((n) => Buffer.from(n + '\0', 'latin1'));
   const textBytes = text.reduce((sum, b) => sum + b.length, 0);
-  const size = 8 + places.length * 12 + names.length * 2 + textBytes;
+  const atlas = signs.length ? signAtlas(signs) : null;
+  const signAt = (8 + places.length * 12 + names.length * 2 + textBytes + 3) & ~3;
+  const size = signAt + (atlas ? 32 + atlas.bytes.length : 0);
   const buf = Buffer.alloc((size + 3) & ~3);
   let o = 0;
-  for (const v of [places.length, names.length, 0, 0]) { buf.writeUInt16LE(v, o); o += 2; }
+  for (const v of [places.length, names.length, signs.length, atlas ? signAt / 4 : 0]) { buf.writeUInt16LE(v, o); o += 2; }
   for (const p of places) { buf.writeInt32LE(p.x, o); buf.writeInt32LE(p.z, o + 4); buf.writeUInt16LE(p.name, o + 8); buf.writeUInt8(p.kind, o + 10); o += 12; }
   let off = 0;
   for (const b of text) { buf.writeUInt16LE(off, o); o += 2; off += b.length; }
   for (const b of text) { b.copy(buf, o); o += b.length; }
+  if (atlas) {
+    o = signAt;
+    SIGN_PALETTE.forEach((c, i) => buf.writeUInt16LE(sign15(c), o + i * 2));
+    atlas.bytes.copy(buf, o + 32);
+  }
   return buf;
 }
 const global = globalBlob();
 const graph = graphBlob();
-const MAX_GRAPH_BYTES = 320 * 1024;  // must match GRAPH_BYTES in src/route.c
+const MAX_GRAPH_BYTES = 192 * 1024;  // must match GRAPH_BYTES in src/route.h
 if (graph.length > MAX_GRAPH_BYTES) throw new Error(`the road graph takes ${graph.length} bytes (max ${MAX_GRAPH_BYTES})`);
 const MAX_GLOBAL_BYTES = 64 * 1024;  // must match GLOBAL_BYTES in src/world.c
 if (global.length > MAX_GLOBAL_BYTES) throw new Error(`places/roads/names take ${global.length} bytes (max ${MAX_GLOBAL_BYTES})`);
@@ -864,7 +1131,7 @@ function encodeTile(t, near) {
   for (const f of faces) {
     for (let k = 0; k < 4; k++) buf.writeUInt16LE(remap(f.v[k]), o + k * 2);
     f.uv.forEach((u, k) => buf.writeUInt8(u, o + 8 + k));
-    buf.writeUInt8(f.tex | (f.layer << 4), o + 12);
+    buf.writeUInt8(f.tex | (f.layer << 6), o + 12);
     f.rgb.forEach((c, k) => buf.writeUInt8(clampByte(c), o + 13 + k));
     o += 16;
   }
@@ -933,7 +1200,7 @@ const report = {
   streetNames: stats.names.size, spawn: { from: spawnFrom, metres: spawn.map((v) => +v.toFixed(1)) },
   largestTile: { at: worst, bytes: maxBytes, maxVerts }, largestFarTile: maxFar, fileBytes: out.length,
   places: places.length, fuelStations: places.filter((p) => p.kind === 1).length, mechanics: places.filter((p) => p.kind === 2).length,
-  minimapSegments: segs.length, globalBytes: global.length, roadGraph: stats.graph,
+  minimapSegments: segs.length, globalBytes: global.length, roadGraph: stats.graph, landmarks: landmarkStats, signs: stats.signs, signList: signs.map((x) => `${x.lines.join(' / ')} @ ${x.at}`), buildingsReplacedByLandmarks: stats.replacedByLandmarks,
   terrain: dem ? dem.source : 'flat', extraFiles: extraPaths,
   guessedHeights: levelStats,
   coastKm: +stats.coastKm.toFixed(2), seaGroundCells: stats.seaCells, featuresOutsideBox: stats0.outside,
