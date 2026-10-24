@@ -2,6 +2,12 @@
   "rom": "build/game.cue",
   "steps": [
     {"waitUntil": {"address": "boot_magic", "as": "u32", "op": "eq", "value": 1372913665}, "maxFrames": 3000},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 0}, "maxFrames": 3000},
+    {"wait": 60},
+    {"tap": "START"},
+    {"wait": 20},
+    {"name": "title menu: NEW TRIAL", "tap": "CROSS"},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 300},
     {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 3000},
     {"name": "stand below the first husk (4,1), facing it", "write": "player", "hex": "04000000 02000000 04000000 02000000 00000000"},
     {"waitUntil": {"address": "enemies", "as": "s32", "op": "eq", "value": 3}, "maxFrames": 600},

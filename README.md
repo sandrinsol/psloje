@@ -5,7 +5,11 @@ grid that shrinks floor by floor. You are a damned soul fighting through the
 seven sins of an afterlife trial. See [docs/design-brief.md](docs/design-brief.md)
 and [docs/decisions.md](docs/decisions.md).
 
-**Status: Floor 1 prototype, in 3D.** The 9 x 9 floor of Sloth: carved rune
+**Status: Floor 1 prototype, in 3D.** A title screen (the name carved in
+stone, 640 x 480), menus (pause, options with volume, a wider parry window
+and a slower game speed as assists, button remapping, credits), a carved
+stone HUD in the game's own serif lettering, fades and a slow zoom onto the
+floor as it begins. The 9 x 9 floor of Sloth: carved rune
 slabs floating over a sea of ash, sunken statues in the haze, ash falling.
 A fixed camera looks at the whole floor from the south, high and tilted. Three waves of husks raise
 their arms over their heads, and the runes of the slabs they're about to
@@ -23,6 +27,9 @@ synthesised sound effects. When the floor is won its outer ring breaks away.
 | Circle + direction | Dodge that way (invincible frames, stamina) | arrow + Z |
 | Circle | Dodge away from the enemy you face | Z |
 | (automatic) | Face the nearest enemy, along a row or column | |
+| Start | Pause (options, return to title) | Enter |
+
+The action buttons can be changed in Options > Controls.
 | X | Attack (sword: the tile in front) | X |
 | Square | Block; press just before a hit to parry | S |
 | Triangle | Drink a flask | A |
@@ -42,7 +49,8 @@ Needs PSn00bSDK (see `.devcontainer/install-psn00bsdk.sh`) and Node.js:
     cmake --preset default && cmake --build build
 
 Generated assets (committed; rerun after changing them):
-`node tools/makeglyphs.mjs` (HUD glyphs), `node tools/makeslabs.mjs` (the
+`node tools/makeglyphs.mjs` (HUD glyphs), `python3 tools/makefont.py`
+(lettering and the logo, from Liberation Serif, see docs/credits.md), `node tools/makeslabs.mjs` (the
 floor's rune slabs and their glow colours), `node tools/makesfx.mjs` (sound
 effects, synthesised and encoded as SPU ADPCM).
 
@@ -57,6 +65,9 @@ effects, synthesised and encoded as SPU ADPCM).
 - `src/models.c`: the soul, the husk and the statues, built from boxes,
   prisms and cones and posed by turning their parts.
 - `src/audio.c`: sound effects on SPU voices, from game events.
-- `src/main.c`: 60 fps loop and pad input.
+- `src/ui.c`: lettering, carved panels, fades, the title screen and the
+  menus, settings and button mapping.
+- `src/main.c`: the screens (title at 640 x 480, the fight at 320 x 240),
+  60 fps loop and pad input.
 - `tests/ps1/*.json`: ps1-test scripts (moving and facing, death and the
   drop, parry and riposte), run on every push.

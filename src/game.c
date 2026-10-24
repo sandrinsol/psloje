@@ -19,6 +19,7 @@
 #define RIPOSTE_FACTOR  3      /* hitting a staggered enemy */
 #define BLOCK_COST      (22 * 16)
 #define PARRY_WINDOW    6      /* Square pressed this many frames or less before the hit */
+#define PARRY_WIDE      10     /* with the assist option */
 #define GUARD_BREAK     40
 #define STAMINA_REGEN   13     /* /16 a frame: ~49 a second */
 #define STAMINA_WAIT    15
@@ -54,6 +55,7 @@ int32_t hitstop_t;
 GameEvent game_events[MAX_EVENTS];
 int32_t num_events;
 int32_t floor_t;   /* frames in the floor's current state */
+int32_t parry_wide;
 
 static uint16_t held_pressed;   /* buttons pressed during a hit-stop */
 
@@ -176,7 +178,7 @@ static int player_hit(int ex, int ey, int damage) {
 	int facing_it = (adx >= ady && player.facing == (dx > 0 ? DIR_RIGHT : DIR_LEFT)) ||
 	                (ady >= adx && player.facing == (dy > 0 ? DIR_DOWN : DIR_UP));
 	int ready = player.state == P_IDLE;
-	if (ready && player.parry_t <= PARRY_WINDOW && facing_it) {
+	if (ready && player.parry_t <= (parry_wide ? PARRY_WIDE : PARRY_WINDOW) && facing_it) {
 		player.parry_t = 999;
 		player.parried_t = 0;
 		shake_t = 6;

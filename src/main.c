@@ -1,14 +1,13 @@
 /*
  * GRID SOULS: a souls-like on a shrinking grid, for the PlayStation.
  *
- * Controls: D-pad turns, Circle dodges one tile (the way you face, or the
- * way a held direction points, keeping your facing), X attacks, Square
- * blocks (a press just before a hit parries), Triangle drinks a flask.
- *
- * Runs at 60 fps: one game frame per VSync.
+ * The title screen and menus run at 640 x 480 (interlaced), the fight at
+ * 320 x 240, 60 fps. Controls in the fight (remappable in Options): the
+ * D-pad walks, Circle (+ a direction) dodges, Cross attacks, Square blocks
+ * (a press just before a hit parries), Triangle drinks a flask, Start pauses.
  *
  * Variables the test harness reads by name (see ps1test.json):
- *   boot_magic, frame_count, cpu_usage, fps
+ *   boot_magic, frame_count, cpu_usage, fps, screen
  *   player (game.h), wave, enemies_alive, absolution, guilt, floor_state,
  *   drop_x, drop_y, drop_amount
  */
@@ -23,9 +22,8 @@
 #include "game.h"
 #include "draw.h"
 #include "audio.h"
+#include "ui.h"
 
-#define SCREEN_W 320
-#define SCREEN_H 240
 #define PRIM_LEN (96 * 1024)
 
 typedef struct {
@@ -38,6 +36,8 @@ typedef struct {
 static Buffer buffers[2];
 static int active;
 
+enum { SCREEN_TITLE, SCREEN_GAME };
+volatile int32_t screen = -1;
 volatile uint32_t frame_count;
 volatile uint32_t boot_magic;   /* 0x51D50001 once main() runs: tests wait for it */
 volatile int32_t cpu_usage;
@@ -46,25 +46,40 @@ volatile int32_t fps;
 static uint8_t pad_buffers[2][34];
 static uint16_t held;
 
-static void init(void) {
-	ResetGraph(0);
+/* 640 x 480 interlaced (one buffer, drawn while shown) or 320 x 240 double
+ * buffered. */
+static void set_video(int hires) {
 	Colour bg;
 	draw_void_colour(&bg);
+	DrawSync(0);
+	ui_hires = hires;
 	for (int i = 0; i < 2; i++) {
-		SetDefDispEnv(&buffers[i].disp, i ? 0 : SCREEN_W, 0, SCREEN_W, SCREEN_H);
-		SetDefDrawEnv(&buffers[i].draw, i ? SCREEN_W : 0, 0, SCREEN_W, SCREEN_H);
-		setRGB0(&buffers[i].draw, bg.r, bg.g, bg.b);
+		if (hires) {
+			SetDefDispEnv(&buffers[i].disp, 0, 0, 640, 480);
+			SetDefDrawEnv(&buffers[i].draw, 0, 0, 640, 480);
+			buffers[i].disp.isinter = 1;
+			buffers[i].draw.dfe = 1;
+			setRGB0(&buffers[i].draw, 0, 0, 0);
+		} else {
+			SetDefDispEnv(&buffers[i].disp, i ? 0 : 320, 0, 320, 240);
+			SetDefDrawEnv(&buffers[i].draw, i ? 320 : 0, 0, 320, 240);
+			setRGB0(&buffers[i].draw, bg.r, bg.g, bg.b);
+		}
 		buffers[i].draw.isbg = 1;
 		buffers[i].draw.dtd = 1;
 	}
-	PutDispEnv(&buffers[0].disp);
-	PutDrawEnv(&buffers[0].draw);
+	gte_SetGeomOffset(160, 120);
+	PutDispEnv(&buffers[active].disp);
+	PutDrawEnv(&buffers[active].draw);
+}
 
-	FntLoad(960, 0);
+static void init(void) {
+	ResetGraph(0);
 	InitGeom();
-	gte_SetGeomOffset(SCREEN_W / 2, SCREEN_H / 2);
 	gte_SetGeomScreen(170);
+	set_video(1);
 	draw_init();
+	ui_init();
 	audio_init();   /* before the pads: SpuInit() hangs after StartPAD() */
 
 	InitPAD(pad_buffers[0], 34, pad_buffers[1], 34);
@@ -76,40 +91,119 @@ static void init(void) {
 	SetDispMask(1);
 }
 
-static Input read_pad(void) {
+static void read_pad(uint16_t *now_out, uint16_t *pressed_out) {
 	PADTYPE *pad = (PADTYPE *)pad_buffers[0];
-	Input in = { 0, 0 };
 	uint16_t now = 0;
 	if (pad->stat == 0 && pad->type != 0)
 		now = ~pad->btn;
-	in.held = now;
-	in.pressed = now & ~held;
+	*pressed_out = now & ~held;
+	*now_out = now;
 	held = now;
-	return in;
+}
+
+/* ---- Screens ------------------------------------------------------------------------------ */
+
+static int title_ready;    /* past "PRESS START" */
+static int pending = UI_NOTHING;   /* waiting for a fade-out to finish */
+static int paused;
+
+static void go_title(void) {
+	set_video(1);
+	screen = SCREEN_TITLE;
+	title_ready = 0;
+	menu_open(MENU_NONE);
+	fade_to(0, 6);
+}
+
+static void go_game(void) {
+	set_video(0);
+	screen = SCREEN_GAME;
+	paused = 0;
+	game_start_floor(0);
+	fade_to(0, 4);
+}
+
+static void update(uint16_t now, uint16_t pressed) {
+	/* A screen change waits for the fade to black. */
+	if (pending != UI_NOTHING) {
+		if (!fade_done()) return;
+		int p = pending;
+		pending = UI_NOTHING;
+		if (p == UI_NEW_GAME) go_game();
+		if (p == UI_QUIT_TO_TITLE) go_title();
+		return;
+	}
+	if (screen == SCREEN_TITLE) {
+		if (!title_ready) {
+			if (pressed & (PAD_START | PAD_CROSS)) {
+				title_ready = 1;
+				menu_open(MENU_TITLE);
+			}
+			return;
+		}
+		int r = menu_update(now, pressed);
+		if (r == UI_NEW_GAME) { pending = r; fade_to(255, 8); }
+		return;
+	}
+	/* The fight. */
+	if (paused) {
+		int r = menu_update(now, pressed);
+		if (r == UI_RESUME) paused = 0;
+		if (r == UI_QUIT_TO_TITLE) { paused = 0; pending = r; fade_to(255, 8); }
+		return;
+	}
+	if ((pressed & PAD_START) && floor_state != F_DEAD) {
+		paused = 1;
+		menu_open(MENU_PAUSE);
+		return;
+	}
+	/* Assist: at 3/4 speed every fourth frame waits (inputs carry over). */
+	static uint16_t carried;
+	if (settings.slow && (frame_count & 3) == 3) {
+		carried |= pressed;
+		return;
+	}
+	Input in = { settings_map(now), settings_map(pressed | carried) };
+	carried = 0;
+	parry_wide = settings.parry_wide;
+	game_update(&in);
+	audio_events();
 }
 
 int main(int argc, const char **argv) {
 	boot_magic = 0x51D50001;
 	init();
-	game_start_floor(0);
+	go_title();
 
 	int fps_frames = 0, fps_start = VSync(-1);
 	for (;;) {
-		Buffer *b = &buffers[active];
-		Input in = read_pad();
-		game_update(&in);
-		audio_events();
+		Buffer *b = &buffers[ui_hires ? 0 : active];
+		uint16_t now, pressed;
+		read_pad(&now, &pressed);
+		update(now, pressed);
 
 		ClearOTagR(b->ot, OT_LEN);
-		draw_frame(b->ot, b->prims, b->prims + PRIM_LEN - 1024, frame_count);
+		uint8_t *prim = b->prims, *end = b->prims + PRIM_LEN - 1024;
+		if (screen == SCREEN_GAME) prim = draw_frame(b->ot, prim, end, frame_count);
+		ui_begin(b->ot, prim, end);
+		fade_draw();   /* first in the top slot: over everything */
+		if (screen == SCREEN_TITLE) {
+			if (!title_ready && (frame_count & 32))
+				text(320, 360, "PRESS START", FONT_LARGE, 200, 186, 160, 1, 1);
+			menu_draw(frame_count);
+			title_draw(frame_count, menu_current() == MENU_TITLE || !title_ready);
+		} else if (paused) {
+			menu_draw(frame_count);
+		}
+		ui_end();
 
 		frame_count++;
 		fps_frames++;
-		int now = VSync(-1);
-		if (now - fps_start >= 60) {
-			fps = fps_frames * 60 / (now - fps_start);
+		int vnow = VSync(-1);
+		if (vnow - fps_start >= 60) {
+			fps = fps_frames * 60 / (vnow - fps_start);
 			fps_frames = 0;
-			fps_start = now;
+			fps_start = vnow;
 		}
 
 		DrawSync(0);
@@ -119,7 +213,7 @@ int main(int argc, const char **argv) {
 		PutDispEnv(&b->disp);
 		PutDrawEnv(&b->draw);
 		DrawOTag(b->ot + OT_LEN - 1);
-		active ^= 1;
+		if (!ui_hires) active ^= 1;
 	}
 	return 0;
 }

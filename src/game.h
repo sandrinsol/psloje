@@ -69,6 +69,7 @@ extern const char *message;
 extern int32_t shake_t;
 extern int32_t hitstop_t;   /* frames the game stays frozen (hit-stop) */
 extern int32_t floor_t;     /* frames in the floor's current state */
+extern int32_t parry_wide;  /* assist: a wider parry window */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_RIPOSTE, EV_KILL, EV_BLOCK, EV_PARRY, EV_HURT,

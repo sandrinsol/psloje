@@ -17,6 +17,7 @@
 #include "glyphs.h"
 #include "models.h"
 #include "slabs.h"
+#include "ui.h"
 
 extern const uint32_t glyphs_tim[], slabs_tim[];
 
@@ -156,6 +157,11 @@ static void tile_world(int tx16, int ty16, int *x, int *z) {
 static void update_camera(int frame) {
 	int sp = isin(CAM_PITCH), cp = icos(CAM_PITCH);
 	int dist = grid_n * CAM_DIST_PER_TILE - zoom;
+	/* A floor begins: the camera drifts in from far above. */
+	if (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 150) {
+		int k = 150 - floor_t;
+		dist += 1600 * k / 150 * k / 150;
+	}
 	cam_x = kick_x;
 	cam_y = -(dist * sp >> 12);
 	cam_z = CAM_LOOK_Z - (dist * cp >> 12) + kick_z;
@@ -584,39 +590,44 @@ static void box2d(int layer, int x, int y, int w, int h, int r, int g, int b) {
 	prim += sizeof(TILE);
 }
 
-static void text(int x, int y, const char *s) {
-	prim = (uint8_t *)FntSort(ot + 0, (char *)prim, x, y, s);
-}
+static const char *ROMAN[] = { "I", "II", "III", "IV", "V", "VI", "VII" };
 
-static void bar(int x, int y, int w, int value, int max, int r, int g, int b) {
-	box2d(1, x, y, w, 6, 24, 22, 28);
-	box2d(0, x + 1, y + 1, (w - 2) * value / max, 4, r, g, b);
-}
-
-static void draw_hud(void) {
+/* The HUD: two carved panels on top (life, stamina, flasks; absolution),
+ * the wave, messages in a band across the middle. */
+static void draw_hud(int frame) {
 	char line[48];
 	const Player *p = &player;
-	bar(8, 6, 104, p->hp, HP_MAX, 190, 40, 40);
-	bar(8, 14, 104, p->stamina, STAMINA_MAX * 16, 120, 190, 70);
-	for (int i = 0; i < p->flasks; i++) glyph(ot, G_FLASK, 124 + i * 14, 11, 16, 120, 200, 170, 0);
-	glyph(ot, G_FLAME, 250, 11, 16, 230, 180, 80, 0);
+	ui_begin(ot, prim, prim_end);
+	panel(6, 5, 148, 25, 1);
+	bar(11, 9, 100, 7, p->hp, HP_MAX, 200, 36, 30, 0);
+	bar(11, 19, 100, 6, p->stamina, STAMINA_MAX * 16, 150, 170, 80, 0);
+	prim = ui_end();
+	for (int i = 0; i < 3; i++)
+		glyph(ot, G_FLASK, 122 + i * 11, 17, 14, i < p->flasks ? 120 : 30, i < p->flasks ? 200 : 34, i < p->flasks ? 170 : 40, 0);
+	/* Absolution: a flame that never quite holds still. */
+	int fl = 15 + ((frame * 7) % 5 == 0) + (isin((frame * 150) & 4095) >> 11);
+	glyph(ot, G_FLAME, 262, 16 - (fl - 15), fl, 240, 170 + (isin((frame * 90) & 4095) >> 8), 70, 0);
+	ui_begin(ot, prim, prim_end);
+	panel(250, 5, 64, 25, 1);
 	sprintf(line, "%d", absolution);
-	text(260, 8, line);
+	text(306, 10, line, FONT_SMALL, 230, 205, 150, 2, 0);
 	if (floor_state == F_FIGHT || floor_state == F_WAVE_INTRO) {
-		sprintf(line, "WAVE %d/3", wave + 1);
-		text(176, 8, line);
+		sprintf(line, "WAVE %s", ROMAN[wave < 3 ? wave : 2]);
+		text(202, 11, line, FONT_SMALL, 170, 160, 150, 1, 0);
 	}
 	if (message && (message_t > 0 || floor_state == F_DEAD || floor_state == F_CLEARED)) {
-		int len = 0;
-		while (message[len]) len++;
-		box2d(1, 160 - len * 4 - 8, 92, len * 8 + 16, 18, 10, 9, 12);
-		text(160 - len * 4, 97, message);
+		int big = text_width(message, FONT_LARGE) <= 280;
+		int dead = floor_state == F_DEAD;
+		int y = dead ? 82 : 92;
+		dark_box(0, y, 320, big ? 38 : 26, 120, 2);
+		text(160, y + (big ? 5 : 6), message, big ? FONT_LARGE : FONT_SMALL, dead ? 210 : 220, dead ? 50 : 200, dead ? 40 : 160, 1, 0);
 	}
-	if (floor_state == F_DEAD && (game_frames & 32)) text(76, 124, "PRESS X TO RISE AGAIN");
 	if (floor_state == F_DEAD) {
+		if (game_frames & 32) text(160, 126, "PRESS CROSS TO RISE AGAIN", FONT_SMALL, 200, 190, 180, 1, 0);
 		sprintf(line, "GUILT %d", guilt + 1);
-		text(132, 140, line);
+		text(160, 148, line, FONT_SMALL, 150, 120, 110, 1, 0);
 	}
+	prim = ui_end();
 }
 
 /* ---- Poses ----------------------------------------------------------------------------- */
@@ -834,6 +845,6 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame) {
 	}
 
 	draw_particles();
-	draw_hud();
+	draw_hud(frame);
 	return prim;
 }
