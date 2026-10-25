@@ -47,13 +47,13 @@ What was decided on top of the [design brief](design-brief.md).
 | Button | Action |
 |---|---|
 | D-pad | Walk one tile (20 frames, no stamina), screen directions |
-| Circle + direction | Dodge two tiles that way, over an enemy too (12 frames, 8 invincible, 25 % stamina); one tile if the second is taken; onto nothing: the soul falls |
+| Circle + direction | Dodge two tiles that way, over an enemy too (15 frames, 10 invincible, 50 % stamina); one tile if the second is taken; onto nothing: the soul falls. Circle pressed again during a dodge is ignored, and after one lands the next waits 14 frames (no running off the edge with a double press) |
 | Circle alone | Dodge away from the enemy you face |
 | (automatic) | Face the nearest enemy along a row or column; exactly diagonal: keep facing (not mid-dodge: it turns as it lands) |
 | R2 | Lock on to the next enemy; past the last, back to the nearest |
-| Square | Attack: windup, hit, recovery; stamina. Held 30 frames: a heavy blow (2.5x damage, staggers), on release |
-| X | Jump in place (28 frames, airborne 3..21: ground attacks miss; 20 % stamina) |
-| Triangle | Drink a flask (takes time, you can be hit) |
+| Square | Light swings chain, three at most (20, 20, then 35; the first lands on frame 8). Held 37 frames: a heavy blow (50, breaks a husk), on release; while held, the soul can step at half pace, facing where it was |
+| X | Jump in place, high (35 frames, airborne 4..26: ground attacks miss; 20 % stamina) |
+| Triangle | Drink a flask (40 frames standing still; a hit spills it) |
 | L1 / R1 | The two active skills |
 
 Input: a press while busy is buffered (12 frames); a dodge or jump cancels a
@@ -61,8 +61,24 @@ charge or a swing's recovery (from 6 frames after a light hit, 12 after a
 heavy one); any action cancels a walk (back to the tile it left if not yet
 halfway, gliding there). The left stick walks like the D-pad.
 
+Everything runs a quarter slower than at first (heavier, after playing):
+the soul's steps, dodges and swings, the enemies' windups and recoveries.
+Stamina refills a third faster to match a dodge's 50 %.
+
 A perfect dodge: one started within 6 frames of a blow landing on the tile
-it left. Time runs at a third for half a second and 30 % stamina comes back.
+it left. Time runs at a third for half a second, 30 % stamina comes back,
+and the next blow is a riposte (3x), whoever it hits.
+
+Backstab: a blow on an enemy's back (it faces the way it last turned:
+frozen while it strikes, recovers, is broken or asleep) does double and
+breaks it. A riposte on a broken husk is a finisher: the camera comes in
+low and close, the thrust slowed, "FINISHED".
+
+Taking hits: the heavy blows (the cross, the line, the bell's row, all of
+the Unfinished's) knock the soul a tile away from the attacker, off the
+edge if there's nothing there. What a blow takes stays pale on the bar for
+3 s (rally): each blow struck in that time wins back half its damage, up to
+the pale part.
 While invincible the soul leaves pale afterimages.
 
 The heavy blow lands later (frame 8 of 32), kicks the camera harder and
@@ -93,7 +109,10 @@ husk; any hit on a broken husk is a riposte, 3x damage.
 - One fixed difficulty; the slower game speed assist was removed.
 - The Unfinished also: unravels (both diagonals, then its row and column),
   and loose threads (a cross where the soul stands, then again where it
-  went).
+  went); and its rope reaches along a line (shown in purple): caught, the
+  soul is hurt and dragged a tile towards it.
+- Balance: tools/playtest.mjs, a bot that plays whole runs through the
+  ps1-test harness and reports deaths (by wave), time and damage taken.
 
 ## Death and progression
 - Each floor: waves of enemies, then the boss. Dying restarts the floor.

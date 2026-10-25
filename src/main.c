@@ -303,6 +303,7 @@ static void update(uint16_t now, uint16_t pressed) {
 		}
 		if (game_events[i].type == EV_RISE) music_play(SONG_SLOTH, 120);
 		if (game_events[i].type == EV_PERFECT && slow_t < 30) slow_t = 30;
+		if (game_events[i].type == EV_FINISHER && slow_t < 36) slow_t = 36;   /* the finishing thrust, slowed */
 		if (game_events[i].type == EV_BOSS) music_play(SONG_BOSS, 20);   /* its name carved: its theme */
 	}
 	audio_events();
