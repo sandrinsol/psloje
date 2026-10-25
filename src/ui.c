@@ -427,3 +427,107 @@ void menu_draw(int frame) {
 	/* The pause menu darkens the fight behind it. */
 	if (menu != MENU_TITLE && !hi) dark_box(0, 0, SW(), SH(), 110, 6);
 }
+
+/* ---- The story's screens ------------------------------------------------------------------------ */
+/* Texts: docs/story.md. */
+
+static const char *OPENING[] = {
+	"You wake on cold stone, above nothing.",
+	"You do not know your name.",
+	"Somewhere far below, a bell is ringing.",
+	"It should have rung long ago.",
+};
+#define OPENING_LINES 4
+#define OPENING_STEP  80   /* frames between lines */
+
+int opening_draw(int t) {
+	int w = SW();
+	for (int i = 0; i < OPENING_LINES; i++) {
+		int k = t - 30 - i * OPENING_STEP;
+		if (k <= 0) continue;
+		int c = k > 50 ? 200 : k * 4;
+		text(w / 2, 150 + i * 46, OPENING[i], FONT_LARGE, c, c * 15 / 16, c * 7 / 8, 1, 1);
+	}
+	int done = t > 30 + OPENING_LINES * OPENING_STEP + 30;
+	if (done && (t & 32)) text(w / 2, 420, "PRESS CROSS", FONT_SMALL, 140, 132, 124, 1, 1);
+	return done;
+}
+
+static void quad(int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3, int r, int g, int b, int layer) {
+	if (!room(sizeof(POLY_F4))) return;
+	POLY_F4 *q = (POLY_F4 *)prim;
+	setPolyF4(q);
+	setXY4(q, x0, y0, x1, y1, x2, y2, x3, y3);
+	setRGB0(q, r, g, b);
+	addPrim(ot + layer, q);
+	prim += sizeof(POLY_F4);
+}
+
+static void line(int x0, int y0, int x1, int y1, int r, int g, int b, int layer) {
+	if (!room(sizeof(LINE_F2))) return;
+	LINE_F2 *l = (LINE_F2 *)prim;
+	setLineF2(l);
+	setXY2(l, x0, y0, x1, y1);
+	setRGB0(l, r, g, b);
+	addPrim(ot + layer, l);
+	prim += sizeof(LINE_F2);
+}
+
+/* A still picture for Memory I: the bell tower on its cliff, in the rain,
+ * over a dark sea. (x, y): its top left; 300 x 180. */
+static void picture_bell_tower(int x, int y, int t) {
+	/* Front to back: rain, the tower, the cliff, the sea, the sky. */
+	for (int i = 0; i < 70; i++) {
+		int rx = x + (i * 89 + t * 3) % 300, ry = y + (i * 53 + t * 9) % 170;
+		line(rx, ry, rx - 4, ry + 10, 120, 126, 140, 2);
+	}
+	int tx = x + 214, ty = y + 18;
+	quad(tx + 6, ty + 30, tx + 18, ty + 30, tx + 6, ty + 46, tx + 18, ty + 46, 14, 12, 14, 2);   /* the belfry's opening */
+	quad(tx + 8, ty + 34, tx + 16, ty + 34, tx + 6, ty + 44, tx + 18, ty + 44, 150, 112, 60, 2);  /* the bell */
+	quad(tx, ty + 24, tx + 24, ty + 24, tx - 4, ty + 104, tx + 28, ty + 104, 58, 54, 58, 3);       /* the tower */
+	quad(tx + 12, ty, tx + 12, ty, tx - 2, ty + 26, tx + 26, ty + 26, 40, 36, 42, 3);              /* its roof */
+	quad(x + 176, y + 120, x + 300, y + 118, x + 140, y + 180, x + 300, y + 180, 38, 34, 36, 3);   /* the cliff */
+	quad(x + 176, y + 120, x + 190, y + 116, x + 140, y + 180, x + 160, y + 180, 48, 44, 46, 3);   /* its lit edge */
+	for (int i = 0; i < 6; i++) {   /* the sea's swell */
+		int wy = y + 128 + i * 9 + (isin((t * 20 + i * 900) & 4095) >> 10);
+		line(x, wy, x + 160 - i * 6, wy + 2, 46, 56, 66, 3);
+	}
+	gradient(x, y + 125, 300, 55, 22, 28, 36, 8, 10, 14, 4);   /* the sea */
+	gradient(x, y, 300, 125, 40, 42, 50, 70, 72, 78, 4);       /* the storm sky */
+}
+
+static const char *MEMORY_I[] = {
+	"The rope was fraying. Mira showed me, twice.",
+	"\"I'll mend it tomorrow,\" I said.",
+	"I said it in spring. I said it at harvest.",
+	"I said it the night the clouds came in over the sea.",
+	"Tomorrow never once came.",
+};
+#define MEMORY_LINES 5
+#define CHAR_FRAMES  2   /* the text is written out, a letter at a time */
+
+int memory_draw(int t, int guilt) {
+	int w = SW();
+	text(w / 2, 26, "MEMORY I", FONT_SMALL, 150, 140, 128, 1, 1);
+	text(w / 2, 46, "A BROKEN PROMISE", FONT_LARGE, 220, 200, 160, 1, 1);
+	panel(w / 2 - 156, 86, 312, 192, 5);
+	picture_bell_tower(w / 2 - 150, 92, t);
+	/* The words, a letter at a time, after a moment with the picture. */
+	int left = (t - 60) / CHAR_FRAMES, y = 300;
+	for (int i = 0; i < MEMORY_LINES + 1 && left > 0; i++) {
+		const char *s = i < MEMORY_LINES ? MEMORY_I[i] : guilt >= 5 ? "I am still saying it." : 0;
+		if (!s) break;
+		char shown[64];
+		int n = 0;
+		while (s[n] && n < left && n < 63) { shown[n] = s[n]; n++; }
+		shown[n] = 0;
+		left -= n + 12;   /* a pause between lines */
+		int last = i == MEMORY_LINES;
+		text(w / 2 - text_width(s, FONT_SMALL) / 2, y, shown, FONT_SMALL, last ? 210 : 200, last ? 90 : 190, last ? 80 : 176, 0, 1);
+		y += 24;
+	}
+	int done = left > 30;
+	if (done && (t & 32)) text(w / 2, 440, "PRESS CROSS", FONT_SMALL, 140, 132, 124, 1, 1);
+	gradient(0, 0, w, SH(), 16, 14, 18, 4, 4, 6, 8);
+	return done;
+}

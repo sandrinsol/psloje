@@ -37,7 +37,7 @@ typedef struct {
 static Buffer buffers[2];
 static int active;
 
-enum { SCREEN_TITLE, SCREEN_GAME };
+enum { SCREEN_TITLE, SCREEN_GAME, SCREEN_OPENING, SCREEN_MEMORY };
 volatile int32_t screen = -1;
 volatile uint32_t frame_count;
 volatile uint32_t boot_magic;   /* 0x51D50001 once main() runs: tests wait for it */
@@ -119,6 +119,10 @@ static int ticked;         /* the game moved on this frame */
 static int slow_t;         /* the soul fell: slow motion for a while */
 static int pending = UI_NOTHING;   /* waiting for a fade-out to finish */
 static int paused;
+static int story_t;        /* frames on the opening or memory screen */
+static int memory_done;    /* the memory is all written out */
+/* Screen changes of our own, alongside the menus' UI_* ones. */
+enum { GO_GAME = 100, GO_MEMORY, GO_TITLE };
 
 static void go_title(void) {
 	set_video(1);
@@ -127,6 +131,23 @@ static void go_title(void) {
 	menu_open(MENU_NONE);
 	fade_to(0, 6);
 	music_play(SONG_TITLE, 120);
+}
+
+/* The opening lines, white on black, before the first floor. */
+static void go_opening(void) {
+	screen = SCREEN_OPENING;
+	story_t = 0;
+	fade_to(0, 4);
+	music_play(-1, 0);
+}
+
+/* After the boss: its memory. */
+static void go_memory(void) {
+	set_video(1);
+	screen = SCREEN_MEMORY;
+	story_t = 0;
+	fade_to(0, 3);
+	music_play(SONG_TITLE, 240);
 }
 
 static void go_game(void) {
@@ -146,8 +167,23 @@ static void update(uint16_t now, uint16_t pressed) {
 		if (!fade_done()) return;
 		int p = pending;
 		pending = UI_NOTHING;
-		if (p == UI_NEW_GAME) go_game();
-		if (p == UI_QUIT_TO_TITLE) go_title();
+		if (p == UI_NEW_GAME) go_opening();
+		if (p == GO_GAME) go_game();
+		if (p == GO_MEMORY) go_memory();
+		if (p == UI_QUIT_TO_TITLE || p == GO_TITLE) go_title();
+		return;
+	}
+	if (screen == SCREEN_OPENING || screen == SCREEN_MEMORY) {
+		story_t++;
+		/* A bell, far off, under the opening lines. */
+		if (screen == SCREEN_OPENING && (story_t == 200 || story_t == 290)) music_voice(INST_BELL, 57, 0x1800, 0);
+		/* Cross: past the opening at any time; out of a memory once it's written. */
+		int done = screen == SCREEN_OPENING ? story_t > 20 : memory_done;
+		if (done && (pressed & (PAD_CROSS | PAD_START))) {
+			pending = screen == SCREEN_OPENING ? GO_GAME : GO_TITLE;
+			fade_to(255, 6);
+			if (screen == SCREEN_MEMORY) music_level(0, 40);
+		}
 		return;
 	}
 	if (screen == SCREEN_TITLE) {
@@ -169,7 +205,14 @@ static void update(uint16_t now, uint16_t pressed) {
 		if (r == UI_QUIT_TO_TITLE) { paused = 0; pending = r; fade_to(255, 8); music_level(0, 30); }
 		return;
 	}
-	if ((pressed & PAD_START) && floor_state != F_DEAD) {
+	/* The boss fallen and the floor silent: on to its memory. */
+	if (floor_state == F_CLEARED && boss >= 0 && floor_t > 240) {
+		pending = GO_MEMORY;
+		fade_to(255, 3);
+		music_level(0, 80);
+		return;
+	}
+	if ((pressed & PAD_START) && floor_state != F_DEAD && floor_state != F_BOSS_INTRO) {
 		paused = 1;
 		menu_open(MENU_PAUSE);
 		music_level(110, 20);   /* quieter while paused */
@@ -189,6 +232,7 @@ static void update(uint16_t now, uint16_t pressed) {
 	for (int i = 0; i < num_events; i++) {
 		if (game_events[i].type == EV_DEATH) { slow_t = 90; music_level(0, 150); }   /* the music dies away */
 		if (game_events[i].type == EV_RISE) music_play(SONG_SLOTH, 120);
+		if (game_events[i].type == EV_BOSS) music_play(SONG_BOSS, 20);   /* its name carved: its theme */
 	}
 	audio_events();
 }
@@ -216,6 +260,10 @@ int main(int argc, const char **argv) {
 				text(320, 360, "PRESS START", FONT_LARGE, 200, 186, 160, 1, 1);
 			menu_draw(frame_count);
 			title_draw(frame_count, menu_current() == MENU_TITLE || !title_ready);
+		} else if (screen == SCREEN_OPENING) {
+			opening_draw(story_t);
+		} else if (screen == SCREEN_MEMORY) {
+			memory_done = memory_draw(story_t, guilt);
 		} else if (paused) {
 			menu_draw(frame_count);
 		}

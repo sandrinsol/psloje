@@ -51,6 +51,7 @@ enum { SOUL_BODY, SOUL_HEAD, SOUL_SWORD_ARM, SOUL_ARM };
 enum { HUSK_BODY, HUSK_HEAD, HUSK_RIGHT_ARM, HUSK_LEFT_ARM, HUSK_LEGS };
 enum { BELL_BODY, BELL_HEAD, BELL_ARM, BELL_OTHER_ARM };
 
-extern Model soul_model, husk_model, bell_model, head_statue, hand_statue, pillar_statue;
+extern Model soul_model, husk_model, bell_model, unfinished_model, head_statue, hand_statue, pillar_statue;
+/* The Unfinished's parts are in the husk's order (it moves like one). */
 
 void models_init(void);

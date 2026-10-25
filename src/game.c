@@ -49,9 +49,17 @@
 #define BELL_MOVE       30
 #define BELL_WINDUP     80     /* four tolls */
 #define BELL_RECOVER    50
+
+/* The Unfinished. */
+#define BOSS_DAMAGE     35
+#define BOSS_IDLE       44     /* between blows; faster below half its life */
+#define BOSS_IDLE_ANGRY 26
+#define BOSS_MOVE       40
+#define BOSS_RECOVER    40
+#define BOSS_REWARD     200
 #define BRIGHT_FRAMES   15     /* the last frames of a windup: bright */
 
-enum { ATK_SLAM, ATK_LINE, ATK_CROSS, ATK_RING };
+enum { ATK_SLAM, ATK_LINE, ATK_CROSS, ATK_RING, ATK_UNDONE, ATK_UNDONE2, ATK_TOMORROW, ATK_TOMORROW2, ATK_ROPE };
 
 int32_t grid_n = 9;
 Player player;
@@ -65,6 +73,7 @@ int32_t hitstop_t;
 GameEvent game_events[MAX_EVENTS];
 int32_t num_events;
 int32_t floor_t;   /* frames in the floor's current state */
+int32_t boss = -1;
 
 static uint16_t held_pressed;   /* buttons pressed during a hit-stop */
 
@@ -134,6 +143,7 @@ void game_start_floor(int keep_drop) {
 	}
 	wave = 0;
 	enemies_alive = 0;
+	boss = -1;
 	floor_state = F_WAVE_INTRO;
 	floor_t = 0;
 	say("FLOOR I  -  SLOTH", 120);
@@ -156,6 +166,23 @@ static void spawn_wave(void) {
 		n++;
 	}
 	enemies_alive = n;
+}
+
+/* After the last wave: the Unfinished rises in the middle of the floor. */
+static void spawn_boss(void) {
+	Enemy *e = &enemies[0];
+	memset(e, 0, sizeof(*e));
+	e->kind = K_UNFINISHED;
+	e->state = E_SLEEP;   /* still: it doesn't wake by itself */
+	e->x = e->from_x = 4;
+	e->y = e->from_y = 3;
+	if (player.x == 4 && player.y == 3) e->y = e->from_y = 2;
+	e->hp = BOSS_HP;
+	e->hit_t = 999;
+	boss = 0;
+	enemies_alive = 1;
+	floor_state = F_BOSS_INTRO;
+	floor_t = 0;
 }
 
 /* ---- Player ------------------------------------------------------------------- */
@@ -303,7 +330,7 @@ static void sword_hits(void) {
 	if (e->hp <= 0) {
 		e->state = E_DYING;
 		e->t = 0;
-		absolution += HUSK_REWARD;
+		absolution += e->kind == K_UNFINISHED ? BOSS_REWARD : HUSK_REWARD;
 		enemies_alive--;
 		emit(EV_KILL, tx, ty);
 	} else if (asleep) {
@@ -464,6 +491,31 @@ static void start_attack(Enemy *e, int kind) {
 		e->windup = 65;
 		break;
 	}
+	/* The Unfinished's blows come in two halves: never quite done. */
+	case ATK_UNDONE:    /* the ring around it... */
+	case ATK_UNDONE2: { /* ...then the ring around that */
+		int r = kind == ATK_UNDONE ? 1 : 2;
+		for (int dy = -r; dy <= r; dy++)
+			for (int dx = -r; dx <= r; dx++)
+				if ((dx < 0 ? -dx : dx) == r || (dy < 0 ? -dy : dy) == r) mark(e, e->x + dx, e->y + dy);
+		e->windup = kind == ATK_UNDONE ? 50 : 24;
+		break;
+	}
+	case ATK_TOMORROW:  /* every other row, yours first... */
+	case ATK_TOMORROW2: /* ...and the rest tomorrow */
+		for (int y = 0; y < grid_n; y++)
+			if (((y ^ py) & 1) == (kind == ATK_TOMORROW2))
+				for (int x = 0; x < grid_n; x++)
+					if (x != e->x || y != e->y) mark(e, x, y);
+		e->windup = kind == ATK_TOMORROW ? 70 : 40;
+		break;
+	case ATK_ROPE: {    /* a rope lashed out to the edge */
+		int dx = px - e->x, dy = py - e->y, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+		int sx = adx >= ady ? (dx > 0 ? 1 : -1) : 0, sy = adx >= ady ? 0 : (dy > 0 ? 1 : -1);
+		for (int k = 1; k < grid_n; k++) mark(e, e->x + sx * k, e->y + sy * k);
+		e->windup = e->hp < BOSS_HP / 2 ? 32 : 44;
+		break;
+	}
 	case ATK_RING: { /* the bell: across the whole floor from its edge */
 		int dx = e->x == 0 ? 1 : e->x == grid_n - 1 ? -1 : 0, dy = dx ? 0 : e->y == 0 ? 1 : -1;
 		for (int k = 1; k < grid_n; k++) mark(e, e->x + dx * k, e->y + dy * k);
@@ -492,6 +544,7 @@ static void update_enemy(Enemy *e) {
 	player_tile(&px, &py);
 	switch (e->state) {
 	case E_SLEEP: {
+		if (e->kind == K_UNFINISHED) break;   /* waits for its entrance to end */
 		int dx = px - e->x, dy = py - e->y;
 		if (dx < 0) dx = -dx;
 		if (dy < 0) dy = -dy;
@@ -509,6 +562,24 @@ static void update_enemy(Enemy *e) {
 	case E_IDLE: {
 		if (player.state == P_DEAD)
 			break;
+		if (e->kind == K_UNFINISHED) {
+			if (e->t < (e->hp < BOSS_HP / 2 ? BOSS_IDLE_ANGRY : BOSS_IDLE)) break;
+			int dx = px - e->x, dy = py - e->y, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+			int cheb = adx > ady ? adx : ady;
+			if (cheb <= 2) start_attack(e, ATK_UNDONE);
+			else if ((dx == 0 || dy == 0) && rnd(5) < 3) start_attack(e, ATK_ROPE);
+			else if (cheb > 4 && rnd(2)) {
+				/* Drag itself a tile closer. */
+				int nx = e->x + (adx >= ady ? (dx > 0 ? 1 : -1) : 0), ny = e->y + (adx >= ady ? 0 : (dy > 0 ? 1 : -1));
+				e->t = 0;
+				if (inside(nx, ny) && enemy_at(nx, ny) < 0 && !(nx == px && ny == py)) {
+					e->from_x = e->x; e->from_y = e->y;
+					e->x = nx; e->y = ny;
+					e->state = E_MOVE;
+				}
+			} else start_attack(e, ATK_TOMORROW);
+			break;
+		}
 		if (e->kind == K_BELL) {
 			/* Keeps to its edge: lines up with the soul, then rings. */
 			if (e->t < BELL_IDLE) break;
@@ -553,21 +624,24 @@ static void update_enemy(Enemy *e) {
 		break;
 	}
 	case E_MOVE:
-		if (e->t >= (e->kind == K_BELL ? BELL_MOVE : HUSK_MOVE)) { e->state = E_IDLE; e->t = 0; e->from_x = e->x; e->from_y = e->y; }
+		if (e->t >= (e->kind == K_BELL ? BELL_MOVE : e->kind == K_UNFINISHED ? BOSS_MOVE : HUSK_MOVE)) { e->state = E_IDLE; e->t = 0; e->from_x = e->x; e->from_y = e->y; }
 		break;
 	case E_WINDUP:
 		if (e->attack == ATK_RING && e->t % 20 == 1) emit(EV_BELL, e->x, e->y);   /* each toll */
 		if (e->t >= e->windup) {
 			player_tile(&px, &py);
-			if (e->target[py * MAX_N + px]) player_hit(e->x, e->y, HUSK_DAMAGE);
+			if (e->target[py * MAX_N + px]) player_hit(e->x, e->y, e->kind == K_UNFINISHED ? BOSS_DAMAGE : HUSK_DAMAGE);
 			shake_t = shake_t > 3 ? shake_t : 3;
 			emit(EV_SLAM, e->x, e->y);
 			e->state = E_RECOVER;
 			e->t = 0;
+			/* The second half follows at once. */
+			if (e->attack == ATK_UNDONE) start_attack(e, ATK_UNDONE2);
+			else if (e->attack == ATK_TOMORROW) start_attack(e, ATK_TOMORROW2);
 		}
 		break;
 	case E_RECOVER:
-		if (e->t >= (e->kind == K_BELL ? BELL_RECOVER : HUSK_RECOVER + rnd(20))) { e->state = E_IDLE; e->t = 0; }
+		if (e->t >= (e->kind == K_BELL ? BELL_RECOVER : e->kind == K_UNFINISHED ? BOSS_RECOVER : HUSK_RECOVER + rnd(20))) { e->state = E_IDLE; e->t = 0; }
 		break;
 	case E_STAGGER:
 		if (e->t >= HUSK_STAGGER) { e->state = E_IDLE; e->t = 0; }
@@ -624,10 +698,24 @@ void game_update(const Input *in) {
 			for (int i = 0; i < MAX_ENEMIES; i++) dying |= enemies[i].state == E_DYING;
 			if (!dying) {
 				floor_t = 0;
-				if (++wave < NUM_WAVES) floor_state = F_WAVE_INTRO;
-				else { floor_state = F_CLEARED; say("THE FLOOR FALLS SILENT", 0); emit(EV_CLEAR, 0, 0); }
+				if (boss >= 0) { floor_state = F_CLEARED; say("THE FLOOR FALLS SILENT", 0); emit(EV_CLEAR, 0, 0); }
+				else if (++wave < NUM_WAVES) floor_state = F_WAVE_INTRO;
+				else spawn_boss();
 			}
 		}
+		break;
+	case F_BOSS_INTRO:
+		/* Ash rises into its shape, its name is carved; Cross skips ahead. */
+		if (floor_t == 160) emit(EV_BOSS, enemies[boss].x, enemies[boss].y);
+		if (floor_t > 30 && floor_t < 160 && (in->pressed & (PAD_CROSS | PAD_START))) floor_t = 159;
+		if (floor_t >= BOSS_INTRO) {
+			enemies[boss].state = E_IDLE;
+			enemies[boss].t = 0;
+			floor_state = F_FIGHT;
+			floor_t = 0;
+		}
+		static const Input still = { 0, 0 };
+		in = &still;   /* the soul waits */
 		break;
 	case F_DEAD:
 		if (floor_t > 90 && (in->pressed & PAD_CROSS)) {
