@@ -266,10 +266,10 @@ static void update(uint16_t now, uint16_t pressed) {
 		music_level(110, 20);   /* quieter while paused */
 		return;
 	}
-	/* Assist: at 3/4 speed every fourth frame waits (inputs carry over);
-	 * the soul's fall plays at a third. */
+	/* The soul's fall, and a perfect dodge, play at a third (inputs carry
+	 * over). */
 	static uint16_t carried;
-	if ((settings.slow && (frame_count & 3) == 3) || (slow_t > 0 && slow_t-- % 3)) {
+	if (slow_t > 0 && slow_t-- % 3) {
 		carried |= pressed;
 		return;
 	}
@@ -285,6 +285,7 @@ static void update(uint16_t now, uint16_t pressed) {
 			save_now();
 		}
 		if (game_events[i].type == EV_RISE) music_play(SONG_SLOTH, 120);
+		if (game_events[i].type == EV_PERFECT && slow_t < 30) slow_t = 30;
 		if (game_events[i].type == EV_BOSS) music_play(SONG_BOSS, 20);   /* its name carved: its theme */
 	}
 	audio_events();

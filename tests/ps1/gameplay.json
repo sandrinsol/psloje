@@ -1,0 +1,48 @@
+{
+  "rom": "build/game.cue",
+  "steps": [
+    {"waitUntil": {"address": "boot_magic", "as": "u32", "op": "eq", "value": 1372913665}, "maxFrames": 3000},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 0}, "maxFrames": 3000},
+    {"wait": 60},
+    {"tap": "START"},
+    {"wait": 20},
+    {"name": "title menu: NEW TRIAL", "tap": "CROSS"},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 2}, "maxFrames": 300},
+    {"wait": 30},
+    {"tap": "CROSS"},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 300},
+    {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 3000},
+    {"name": "the husk rises out of the slabs", "assertRam": "enemies", "as": "s32", "equals": 9},
+    {"waitUntil": {"address": "enemies", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 120},
+
+    {"name": "R2: lock on to it", "tap": "R2"},
+    {"wait": 2},
+    {"assertRam": "player+68", "as": "s32", "equals": 0},
+    {"name": "R2 again: back to the nearest", "tap": "R2"},
+    {"wait": 2},
+    {"assertRam": "player+68", "as": "s32", "equals": -1},
+
+    {"name": "a husk just above the soul, about to slam", "write": "player", "hex": "04000000 07000000 04000000 07000000"},
+    {"write": "enemies+8", "hex": "04000000 06000000 04000000 06000000"},
+    {"waitUntil": {"address": "enemies", "as": "s32", "op": "eq", "value": 3}, "maxFrames": 200},
+    {"name": "a dodge at the last moment", "waitUntil": {"address": "enemies+4", "as": "s32", "op": "gte", "value": 50}, "maxFrames": 100, "precise": true},
+    {"write": "player+32", "value": 800, "as": "s32"},
+    {"tap": ["LEFT", "CIRCLE"], "hold": 2, "release": 0},
+    {"wait": 10},
+    {"name": "perfect: unhurt, and breath back", "assertRam": "player+28", "as": "s32", "equals": 100},
+    {"name": "(a dodge costs 400; a perfect one gives 480 back)", "assertRam": "player+32", "as": "s32", "min": 801, "max": 1000},
+    {"wait": 40},
+
+    {"name": "the soul on the left edge", "write": "player", "hex": "00000000 08000000 00000000 08000000 03000000 00000000"},
+    {"wait": 2},
+    {"name": "one step left: onto nothing", "tap": "LEFT", "hold": 3, "release": 0},
+    {"wait": 4},
+    {"assertRam": "player+20", "as": "s32", "equals": 8},
+    {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 3}, "maxFrames": 120},
+    {"waitUntil": {"address": "floor_t", "as": "s32", "op": "gte", "value": 100}, "maxFrames": 600},
+    {"name": "lost to the void", "assert": "goldens/fallen.png"},
+    {"name": "and rises again on the whole floor", "tap": "CROSS"},
+    {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 0}, "maxFrames": 60},
+    {"assertRam": "player+20", "as": "s32", "equals": 0}
+  ]
+}

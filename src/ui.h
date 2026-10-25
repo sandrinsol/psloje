@@ -16,7 +16,7 @@ enum { ACT_ATTACK, ACT_DODGE, ACT_JUMP, ACT_FLASK, ACT_SKILL1, ACT_SKILL2, NUM_A
 
 typedef struct {
 	uint8_t music, sound;          /* 0..10 */
-	uint8_t slow;                  /* assist: the game at 3/4 speed */
+	uint8_t unused;                /* (was the slower game speed; kept for the save's layout) */
 	uint16_t keys[NUM_ACTIONS];    /* PAD_* button for each action */
 } Settings;
 

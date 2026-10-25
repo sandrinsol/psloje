@@ -14,7 +14,7 @@
     {"name": "skip to wave II", "write": "wave", "value": 1, "as": "u32"},
     {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 3000},
     {"name": "wave II: a husk and a sleeper", "assertRam": "enemies+252", "as": "s32", "equals": 1},
-    {"name": "asleep", "assertRam": "enemies+128", "as": "s32", "equals": 7},
+    {"name": "it rises out of the slabs, asleep", "waitUntil": {"address": "enemies+128", "as": "s32", "op": "eq", "value": 7}, "maxFrames": 200},
     {"wait": 60},
     {"name": "still asleep while the soul keeps away", "assertRam": "enemies+128", "as": "s32", "equals": 7},
     {"name": "the soul two tiles off", "write": "player", "hex": "06000000 06000000 06000000 06000000 00000000"},
@@ -24,11 +24,13 @@
     {"write": "enemies+128", "value": 0, "as": "u32"},
     {"write": "enemies_alive", "value": 0, "as": "u32"},
     {"waitUntil": {"address": "wave", "as": "s32", "op": "eq", "value": 2}, "maxFrames": 300},
-    {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 300},
+    {"name": "the edge falls: 7 x 7 now", "waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 400},
+    {"assertRam": "area_x0", "as": "s32", "equals": 1},
+    {"assertRam": "area_y1", "as": "s32", "equals": 7},
     {"name": "wave III: a bell-ringer on the left edge", "assertRam": "enemies+380", "as": "s32", "equals": 2},
     {"write": "player", "hex": "04000000 06000000 04000000 06000000 00000000"},
     {"waitUntil": {"address": "enemies+256", "as": "s32", "op": "eq", "value": 3}, "maxFrames": 900},
     {"name": "it drifted along its edge to the soul's row before ringing", "assertRam": "enemies+268", "as": "s32", "equals": 6},
-    {"assertRam": "enemies+264", "as": "s32", "equals": 0}
+    {"assertRam": "enemies+264", "as": "s32", "equals": 1}
   ]
 }

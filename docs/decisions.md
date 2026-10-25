@@ -33,9 +33,10 @@ What was decided on top of the [design brief](design-brief.md).
 | Button | Action |
 |---|---|
 | D-pad | Walk one tile (20 frames, no stamina), screen directions |
-| Circle + direction | Dodge two tiles that way, over an enemy too (12 frames, 8 invincible, 25 % stamina); one tile if the second is off the floor or taken |
+| Circle + direction | Dodge two tiles that way, over an enemy too (12 frames, 8 invincible, 25 % stamina); one tile if the second is taken; onto nothing: the soul falls |
 | Circle alone | Dodge away from the enemy you face |
-| (automatic) | Face the nearest enemy along a row or column; exactly diagonal: keep facing |
+| (automatic) | Face the nearest enemy along a row or column; exactly diagonal: keep facing (not mid-dodge: it turns as it lands) |
+| R2 | Lock on to the next enemy; past the last, back to the nearest |
 | Square | Attack: windup, hit, recovery; stamina. Held 30 frames: a heavy blow (2.5x damage, staggers), on release |
 | X | Jump in place (28 frames, airborne 3..21: ground attacks miss; 20 % stamina) |
 | Triangle | Drink a flask (takes time, you can be hit) |
@@ -45,6 +46,17 @@ Input: a press while busy is buffered (12 frames); a dodge or jump cancels a
 charge or a swing's recovery (from 6 frames after a light hit, 12 after a
 heavy one); any action cancels a walk (back to the tile it left if not yet
 halfway, gliding there). The left stick walks like the D-pad.
+
+A perfect dodge: one started within 6 frames of a blow landing on the tile
+it left. Time runs at a third for half a second and 30 % stamina comes back.
+While invincible the soul leaves pale afterimages.
+
+The heavy blow lands later (frame 8 of 32), kicks the camera harder and
+cracks the slab under its target; stone flies.
+
+Falling: a step or a dodge onto nothing (off the edge, or where a slab has
+gone) and the soul falls into the void: a death ("LOST TO THE VOID"); the
+absolution drops on the last tile it stood on.
 
 Block and parry were removed after playing: the jump and the charged heavy
 blow took their place. The heavy blow (and later damage skills) breaks a
@@ -59,7 +71,15 @@ husk; any hit on a broken husk is a riposte, 3x damage.
   the soul, and tolls its bell four times before a whole row (or column)
   comes down. Frail (40 hp).
 - Waves: I a husk; II a husk and a sleeper; III two husks and a bell-ringer.
-- One fixed difficulty (the assists: game speed in Options).
+  Each rises out of the slabs as ash (50 frames, untouchable).
+- Between waves, a breather (about 4 s): 25 health back, "THE EDGE
+  CRUMBLES", an edge row and column crack (they tremble and glow), then
+  fall one by one; anything standing on them falls too. 9 x 9, then 8 x 8,
+  7 x 7, and the boss on 6 x 6. The next sin starts whole again.
+- One fixed difficulty; the slower game speed assist was removed.
+- The Unfinished also: unravels (both diagonals, then its row and column),
+  and loose threads (a cross where the soul stands, then again where it
+  went).
 
 ## Death and progression
 - Each floor: waves of enemies, then the boss. Dying restarts the floor.

@@ -20,7 +20,7 @@
 enum { DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT };
 
 /* Player states. */
-enum { P_IDLE, P_DODGE, P_ATTACK, P_DRINK, P_CHARGE, P_DEAD, P_WALK, P_JUMP };
+enum { P_IDLE, P_DODGE, P_ATTACK, P_DRINK, P_CHARGE, P_DEAD, P_WALK, P_JUMP, P_FALL };
 
 /* Pad input for one frame. */
 typedef struct {
@@ -40,10 +40,12 @@ typedef struct {
 	int32_t buffered, buffer_t; /* a dodge/attack/jump pressed while busy */
 	int32_t buffer_dir;
 	int32_t dodge_dir;
+	int32_t lock;           /* the enemy faced (R2 picks the next), -1: the nearest */
 } Player;
 
 /* Enemy states. */
-enum { E_NONE, E_IDLE, E_MOVE, E_WINDUP, E_RECOVER, E_STAGGER, E_DYING, E_SLEEP, E_WAKE };
+enum { E_NONE, E_IDLE, E_MOVE, E_WINDUP, E_RECOVER, E_STAGGER, E_DYING, E_SLEEP, E_WAKE, E_RISE };
+#define RISE_FRAMES  50   /* an enemy rising out of the slabs (ash into shape) */
 /* Kinds: Sloth's husk; a husk asleep until you come near; the bell-ringer,
  * who keeps to the floor's edge and rings a whole row or column down. */
 enum { K_HUSK, K_SLEEPER, K_BELL, K_UNFINISHED };
@@ -74,10 +76,16 @@ typedef struct {
 /* Square held this long: the heavy blow is ready. */
 #define CHARGE_FULL   30
 
+/* Walked or dodged off the edge: falling, then gone (a death). */
+#define FALL_FRAMES   55
+
 #define HP_MAX        100
 #define STAMINA_MAX   100
 
 extern int32_t grid_n;
+/* The part of the grid still standing: after each wave an edge row and
+ * column crumble and fall (9 x 9, 8 x 8, 7 x 7, the boss on 6 x 6). */
+extern int32_t area_x0, area_y0, area_x1, area_y1;   /* inclusive */
 extern Player player;
 extern Enemy enemies[MAX_ENEMIES];
 extern volatile int32_t wave, enemies_alive, absolution, guilt, floor_state, game_frames;
@@ -90,7 +98,7 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL };   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL, EV_FALL, EV_CRUMBLE, EV_PERFECT, EV_SPAWN, EV_LOCK };   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
 typedef struct {
 	int16_t type, x, y;   /* tile */
 } GameEvent;
@@ -122,5 +130,10 @@ void game_start_floor(int keep_drop);
 void game_update(const Input *in);
 /* 0..256 how bright tile (x, y)'s telegraph is (0 = none, 256 = about to land). */
 int game_telegraph(int x, int y);
+/* A slab's state: 0 standing, < 0 crumbling (frames until it falls),
+ * > 0 falling (frames since), or gone once out of the area and settled. */
+int game_slab(int x, int y);
+/* The last death was a fall (nothing left to draw of the soul). */
+int game_fell(void);
 /* The tile the soul is on now (passing over others while it dodges). */
 void game_player_tile(int *x, int *y);
