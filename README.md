@@ -16,7 +16,17 @@ The figures are textured and lit by the GTE: the sky, the soul's light,
 flashes from parries and hits, the red of a telegraph under them; soft round
 shadows. Killed husks shatter into stone and embers; when the soul falls the
 game slows, its light goes out and the colour drains away.
-A fixed camera looks at the whole floor from the south, high and tilted. Three waves: husks that raise
+**Ink and paper:** the trial is drawn on a page. The slabs are sheets of
+paper with runes brushed in ink; further off they're only pencil, then the
+blank page. The soul is a figure of ink; the husks are pencil sketches,
+their lines trembling, rubbed out a piece at a time as they're hurt. Glows
+and sparks are washes and drops of ink. **Ink is your health:** a blow
+spills the soul's ink where it stood; while it's wet (a few seconds), step
+back onto it to take all of it back (striking back wins half of each blow
+back too). The camera is low, over the soul's right shoulder; it turns a
+quarter at a time with the right stick, L2 puts it behind the soul, and it
+follows the enemy locked on (and the Unfinished).
+Three waves: husks that raise
 their arms over their heads, and the runes of the slabs they're about to
 hit glow, then burn (your own slab flashes red); a sleeper slumped on the
 floor that wakes with a roar when you come near (a blow in its sleep does
@@ -54,11 +64,13 @@ own icon): settings, trials, best time, totals.
 
 | Button | Action | Keyboard (web player) |
 |---|---|---|
-| D-pad or left stick | Walk a tile at a time (Up = away from the camera) | arrow keys |
+| D-pad or left stick | Walk a tile at a time (Up = away from the camera, whichever way it looks) | arrow keys |
+| Right stick (flick) | Turn the camera a quarter left or right | |
+| L2 | Camera behind the soul (unless an action is set on L2) | |
 | Circle + direction | Dodge two tiles that way, over enemies too (invincible frames, stamina); off the edge, you fall | arrow + Z |
 | Circle | Dodge away from the enemy you face | Z |
 | (automatic) | Face the nearest enemy, along a row or column | |
-| R2 | Lock on to the next enemy (round to the nearest again) | |
+| R2 | Lock on to the next enemy (round to the nearest again); the camera turns to it | |
 | Square | Attack (sword: the tile in front); hold to charge a heavy blow | S |
 | X | Jump in place: ground attacks miss while you're in the air (stamina) | X |
 | Triangle | Drink a flask | A |
@@ -94,7 +106,7 @@ effects, synthesised and encoded as SPU ADPCM).
 - `src/game.c`: the rules: player (facing, walking, dodges, jumps, sword
   and charged blow, stamina, flasks), husks (moving, telegraphed slam / line / cross attacks,
   stagger), waves, death and the absolution drop.
-- `src/draw.c`: the 3D scene: the fixed camera, the sky (clouds, the eye,
+- `src/draw.c`: the 3D scene on paper: the third-person camera, the sky (clouds, the eye,
   lightning), the slabs (soul light, flashes, telegraph glow, fog, the
   crumbling ring), statues, textured figures lit by the GTE, shadows, ash,
   sparks and stone chunks, the death's grading, the HUD.

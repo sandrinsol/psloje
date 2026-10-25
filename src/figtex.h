@@ -3,9 +3,9 @@
 #define FIG_TPAGE_X 832
 #define FIG_TPAGE_Y 256
 #define FIG_CLUT_X  0
-#define FIG_CLUT_Y  484
+#define FIG_CLUT_Y  498
 /* Materials (u = index * 64, v = 0) and their CLUT rows (FIG_CLUT_Y + id). */
 enum { MAT_FLAT = -1, MAT_ROBE = 0, MAT_ASH, MAT_STONE, MAT_METAL };
 /* Effects (u = index * 64, v = 64) and CLUTs. */
 enum { FX_CLOUD, FX_EYE, FX_CHUNK, FX_GLOW };
-enum { CLUT_ROBE, CLUT_ASH, CLUT_STONE, CLUT_METAL, CLUT_CLOUD, CLUT_EYE, CLUT_GLOW };
+enum { CLUT_ROBE, CLUT_ASH, CLUT_STONE, CLUT_METAL, CLUT_CLOUD, CLUT_EYE, CLUT_GLOW, CLUT_SKETCH };

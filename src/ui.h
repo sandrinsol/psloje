@@ -47,6 +47,9 @@ void text(int x, int y, const char *s, int font, int r, int g, int b, int align,
 void panel(int x, int y, int w, int h, int layer);
 void dark_box(int x, int y, int w, int h, int amount, int layer);   /* subtracts amount */
 void bar(int x, int y, int w, int h, int value, int max, int r, int g, int b, int layer);
+/* The same on paper: a card with an inked edge; a bar as a stroke of ink. */
+void paper_panel(int x, int y, int w, int h, int layer);
+void ink_bar(int x, int y, int w, int h, int value, int max, int r, int g, int b, int layer);
 void gradient(int x, int y, int w, int h, int r0, int g0, int b0, int r1, int g1, int b1, int layer);
 void logo(int cx, int y, int bright, int layer);
 

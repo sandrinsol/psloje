@@ -36,16 +36,20 @@ static int title_mode;   /* drawing the scene behind the title */
 #define CAM_PITCH   620         /* looking down, 4096 = full turn (~55 degrees) */
 #define CAM_DIST_PER_TILE 228   /* camera distance from the floor's middle, per tile of width */
 #define CAM_LOOK_Z  -90         /* looks a little this side of the middle */
+#define CAM_TP_PITCH 400        /* third person: looking down a little (~30 degrees) */
+#define CAM_TP_DIST  1080       /* behind the soul */
+#define CAM_TP_SIDE  130        /* and this far to its right */
 
-/* Floor 1, Sloth: ash, grey stone, a dull light. */
-static const Colour SKY_TOP = { 78, 72, 74 }, SKY_BOTTOM = { 10, 9, 13 }, FOG = { 58, 54, 57 };
-#define AMBIENT     92          /* /256 */
+/* Floor 1, Sloth: a page of paper, the trial inked on it; what's far off
+ * fades back into the blank page. */
+static const Colour SKY_TOP = { 238, 232, 216 }, SKY_BOTTOM = { 214, 205, 186 }, FOG = { 228, 220, 202 };
+#define AMBIENT     250         /* /256: paper is lit evenly */
 #define SOUL_LIGHT  210
-#define FOG_NEAR    3400
-#define FOG_FAR     7600
+#define FOG_NEAR    1500
+#define FOG_FAR     4200
 
-static uint16_t glyph_tpage, glyph_clut, slab_tpage, slab_clut[3];
-static uint16_t fig_tpage, fig_tpage_add, fig_tpage_sub, fig_clut[7];   /* figtex: normal, additive, subtractive */
+static uint16_t glyph_tpage, glyph_clut, slab_tpage, slab_clut[5];
+static uint16_t fig_tpage, fig_tpage_add, fig_tpage_sub, fig_clut[8];   /* figtex: normal, additive, subtractive */
 static uint8_t *prim, *prim_end;
 static uint32_t *ot;
 
@@ -102,19 +106,19 @@ void draw_init(void) {
 	load_tim(glyphs_tim);
 	load_tim(slabs_tim);
 	load_tim(figtex_tim);
-	glyph_tpage = getTPage(0, 1, GLYPH_TPAGE_X, GLYPH_TPAGE_Y);
+	glyph_tpage = getTPage(0, 2, GLYPH_TPAGE_X, GLYPH_TPAGE_Y);
 	glyph_clut = getClut(GLYPH_CLUT_X, GLYPH_CLUT_Y);
 	slab_tpage = getTPage(0, 0, SLAB_TPAGE_X, SLAB_TPAGE_Y);
-	for (int i = 0; i < 3; i++) slab_clut[i] = getClut(SLAB_CLUT_X, SLAB_CLUT_Y + i);
+	for (int i = 0; i < 5; i++) slab_clut[i] = getClut(SLAB_CLUT_X, SLAB_CLUT_Y + i);
 	fig_tpage = getTPage(0, 0, FIG_TPAGE_X, FIG_TPAGE_Y);
 	fig_tpage_add = getTPage(0, 1, FIG_TPAGE_X, FIG_TPAGE_Y);
 	fig_tpage_sub = getTPage(0, 2, FIG_TPAGE_X, FIG_TPAGE_Y);
-	for (int i = 0; i < 7; i++) fig_clut[i] = getClut(FIG_CLUT_X, FIG_CLUT_Y + i);
+	for (int i = 0; i < 8; i++) fig_clut[i] = getClut(FIG_CLUT_X, FIG_CLUT_Y + i);
 	models_init();
 }
 
 void draw_void_colour(Colour *c) {
-	*c = SKY_BOTTOM;
+	*c = FOG;
 }
 
 /* PSn00bSDK's gte_SetRotMatrix() clobbers $t0-$t2 but only declares two of
@@ -226,6 +230,18 @@ static inline int clamp255(int v) {
 	return v < 0 ? 0 : v > 255 ? 255 : v;
 }
 
+/* On paper a light can't shine: what was added light is subtracted ink,
+ * of the light's own hue (taken from the paper: its complement, and a
+ * little grey for body). */
+static inline void ink(int *r, int *g, int *b) {
+	int i = *r > *g ? *r : *g;
+	if (*b > i) i = *b;
+	int grey = i / 3;
+	*r = clamp255(i - *r + grey);
+	*g = clamp255(i - *g + grey);
+	*b = clamp255(i - *b + grey);
+}
+
 /* Semi-transparency mode for what follows in this slot (set just before it). */
 static void blend(uint32_t *s, int abr) {
 	DR_TPAGE *tp = (DR_TPAGE *)prim;
@@ -250,60 +266,37 @@ static void tile_world(int tx16, int ty16, int *x, int *z) {
 
 static int tele[MAX_N][MAX_N];   /* each slab's telegraph, as last drawn */
 
-/* What the camera frames: the soul, the enemies and any slab about to be
- * struck, at least 5 tiles across, never past the floor still standing.
- * Its middle (world x, z) and how many tiles wide, eased towards. */
-static int32_t frame_x, frame_z, frame_w = 9 << 8;   /* x 256 */
-
-static void update_framing(void) {
-	int x0 = player.x, x1 = player.x, y0 = player.y, y1 = player.y;
-	if (player.state == P_DEAD || player.state == P_FALL) { x0 = x1 = player.from_x; y0 = y1 = player.from_y; }
-	for (int i = 0; i < MAX_ENEMIES; i++) {
-		const Enemy *e = &enemies[i];
-		if (e->state == E_NONE || e->state == E_DYING) continue;
-		if (e->x < x0) x0 = e->x;
-		if (e->x > x1) x1 = e->x;
-		if (e->y < y0) y0 = e->y;
-		if (e->y > y1) y1 = e->y;
-	}
-	for (int y = area_y0; y <= area_y1; y++)
-		for (int x = area_x0; x <= area_x1; x++)
-			if (tele[y][x]) {   /* (as the floor was last drawn) */
-				if (x < x0) x0 = x;
-				if (x > x1) x1 = x;
-				if (y < y0) y0 = y;
-				if (y > y1) y1 = y;
-			}
-	/* At least 5 across (the camera sees more width than depth), within
-	 * the floor; a breather or a death shows the whole floor. */
-	int w = x1 - x0 + 1, h = (y1 - y0 + 1) * 5 / 4;
-	int span = w > h ? w : h;
-	int full = (area_x1 - area_x0 > area_y1 - area_y0 ? area_x1 - area_x0 : area_y1 - area_y0) + 1;
-	if (span < 5) span = 5;
-	if (floor_state != F_FIGHT) span = full, x0 = area_x0, x1 = area_x1, y0 = area_y0, y1 = area_y1;
-	if (span > full) span = full;
-	int cx, cz;
-	tile_world((x0 + x1) * 8, (y0 + y1) * 8, &cx, &cz);
-	/* Kept over the floor: the middle can't wander off what's standing. */
-	int ax0, az0, ax1, az1;
-	tile_world(area_x0 * 16, area_y1 * 16, &ax0, &az0);
-	tile_world(area_x1 * 16, area_y0 * 16, &ax1, &az1);
-	int mx = (span - 1) * TILE_U / 2;
-	int lo = ax0 + mx, hi = ax1 - mx;
-	if (lo > hi) lo = hi = (ax0 + ax1) / 2;
-	cx = cx < lo ? lo : cx > hi ? hi : cx;
-	lo = az0 + mx; hi = az1 - mx;
-	if (lo > hi) lo = hi = (az0 + az1) / 2;
-	cz = cz < lo ? lo : cz > hi ? hi : cz;
-	frame_x += (cx - frame_x) / 24;
-	frame_z += (cz - frame_z) / 24;
-	frame_w += ((span << 8) - frame_w) / 30;
-}
-
-/* The camera: south of the floor, high, looking down; it frames the fight
- * (closer when it's all near the soul, wider as it spreads). */
+/* The finisher: the camera closes in on the husk. */
 static int finisher_t, fin_x, fin_z;   /* a broken husk finished: the camera close in */
 #define FINISHER_FRAMES 42
+
+/* Angle of (x, z) from up the grid (+z), turning towards +x; 4096 a turn. */
+static int iatan2(int x, int z) {
+	int ax = x < 0 ? -x : x, az = z < 0 ? -z : z;
+	if (!ax && !az) return 0;
+	/* atan t ~ t pi/4 + 0.273 t (1 - t), t in 0..1 (4096) */
+	int t = ax <= az ? (ax << 12) / az : (az << 12) / ax;
+	int a = (t * 512 + 178 * (t * (4096 - t) >> 12)) >> 12;
+	if (ax > az) a = 1024 - a;
+	if (z < 0) a = 2048 - a;
+	if (x < 0) a = 4096 - a;
+	return a & 4095;
+}
+
+/* Third person: the camera low behind the soul, looking the way it looks:
+ * a quarter turn at a time (the right stick, L2 behind the soul), or at
+ * the enemy locked on. */
+int cam_yaw;
+static int cam_quarter, was_locked;
+
+void draw_turn_camera(int quarters) {
+	if (quarters == 9) cam_quarter = player.facing;   /* behind the soul */
+	else cam_quarter = (cam_quarter + quarters) & 3;
+}
+
+int draw_camera_quarter(void) {
+	return ((cam_yaw + 512) >> 10) & 3;
+}
 
 static void update_camera(int frame) {
 	/* The finisher: in close and lower, then back out (k 0..256..0). */
@@ -312,43 +305,82 @@ static void update_camera(int frame) {
 		int t = FINISHER_FRAMES - finisher_t--;
 		fk = t < 10 ? t * 256 / 10 : finisher_t < 14 ? finisher_t * 256 / 14 : 256;
 	}
-	int pitch = CAM_PITCH - (150 * fk >> 8);
-	int sp = isin(pitch), cp = icos(pitch);
-	if (frame_w <= 0 || (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 2)) { frame_x = frame_z = 0; frame_w = grid_n << 8; }
-	update_framing();
-	int dist = (frame_w * CAM_DIST_PER_TILE >> 8) - zoom;
-	/* A floor begins: the camera drifts in from far above. */
-	if (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 150) {
-		int k = 150 - floor_t;
-		dist += 1600 * k / 150 * k / 150;
-	}
-	/* The boss's entrance: the camera swings in close to where it rises,
-	 * round to one side, and back. */
-	int pan_x = frame_x, look_z = CAM_LOOK_Z * frame_w / (grid_n << 8) + frame_z;
+	int pitch, dist, yaw, tx, ty, tz;
 	if (title_mode) {   /* drifting slowly from side to side over the floor */
+		pitch = CAM_PITCH;
 		dist = 10 * CAM_DIST_PER_TILE + (isin((frame * 3) & 4095) * 120 >> 12);
-		pan_x = isin((frame * 2) & 4095) * 260 >> 12;
-		look_z = CAM_LOOK_Z + 200;
+		yaw = 0;
+		tx = isin((frame * 2) & 4095) * 260 >> 12;
+		ty = 0;
+		tz = CAM_LOOK_Z + 200;
+	} else {
+		int locked = player.lock >= 0 && enemies[player.lock].state != E_NONE && enemies[player.lock].state != E_DYING;
+		if (was_locked && !locked) cam_quarter = draw_camera_quarter();
+		was_locked = locked;
+		int want = cam_quarter * 1024;
+		if (locked) {
+			int ex, ez;
+			tile_world(enemies[player.lock].x * 16, enemies[player.lock].y * 16, &ex, &ez);
+			if (ex != soul_x || ez != soul_z) want = iatan2(ex - soul_x, ez - soul_z);
+		}
+		pitch = CAM_TP_PITCH;
+		dist = CAM_TP_DIST - zoom / 2;
+		/* The Unfinished is huge: further back, a little higher, always
+		 * turned towards it. */
+		if (boss >= 0 && floor_state == F_FIGHT && enemies[boss].state != E_NONE && enemies[boss].state != E_DYING) {
+			int bx, bz;
+			tile_world(enemies[boss].x * 16, enemies[boss].y * 16, &bx, &bz);
+			if (!locked && (bx != soul_x || bz != soul_z)) want = iatan2(bx - soul_x, bz - soul_z);
+			dist += 520;
+			pitch += 90;
+		}
+		tx = soul_x; ty = -110; tz = soul_z;
+		/* A floor begins: the camera comes down from high above. */
+		if (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 150) {
+			int k = 150 - floor_t;
+			k = k * k / 150;
+			dist += 2400 * k / 150;
+			pitch += (900 - pitch) * k / 150;
+		}
+		/* The boss's entrance: turned to it, looking up as it rises. */
+		if (floor_state == F_BOSS_INTRO && boss >= 0) {
+			int t = floor_t > BOSS_INTRO ? BOSS_INTRO : floor_t, k = isin(t * 2048 / BOSS_INTRO);   /* 0 .. 1 .. 0 */
+			int bx, bz;
+			tile_world(enemies[boss].x * 16, enemies[boss].y * 16, &bx, &bz);
+			if (bx != soul_x || bz != soul_z) want = iatan2(bx - soul_x, bz - soul_z);
+			dist += 500 * k >> 12;
+			ty -= 260 * k >> 12;
+			pitch -= 120 * k >> 12;
+		}
+		/* Dead: drawing back and up over where it happened. */
+		if (death_t > 0) {
+			int k = death_t < 120 ? death_t : 120;
+			dist += 700 * k / 120;
+			pitch += 380 * k / 120;
+		}
+		if (fk) {
+			dist -= 380 * fk >> 8;
+			pitch -= 90 * fk >> 8;
+			tx += (fin_x - tx) * fk >> 9;
+			tz += (fin_z - tz) * fk >> 9;
+		}
+		static int started;
+		if (!started || (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 2)) { started = 1; cam_yaw = want; }
+		cam_yaw = ease_angle(cam_yaw, want, 9);
+		yaw = cam_yaw;
+		/* Look a little ahead of the soul, over its right shoulder: it
+		 * stands low and to the left, the tile before it in view. */
+		tx += (isin(yaw) * 260 + icos(yaw) * CAM_TP_SIDE) >> 12;
+		tz += (icos(yaw) * 260 - isin(yaw) * CAM_TP_SIDE) >> 12;
 	}
-	if (floor_state == F_BOSS_INTRO && boss >= 0) {
-		int t = floor_t > BOSS_INTRO ? BOSS_INTRO : floor_t, k = isin(t * 2048 / BOSS_INTRO);   /* 0 .. 1 .. 0 */
-		int bx, bz;
-		tile_world(enemies[boss].x * 16, enemies[boss].y * 16, &bx, &bz);
-		/* (from as far as the whole grid: the framing's 6 x 6 would be too close) */
-		int far = grid_n * CAM_DIST_PER_TILE - zoom;
-		dist += (far - dist) * k >> 12;
-		dist -= 650 * k >> 12;
-		pan_x += ((bx - pan_x) * k >> 12) + (isin(t * 4096 / BOSS_INTRO) * 220 >> 12);
-		look_z += (bz + 420 - look_z) * k >> 12;   /* aim up at it: it's tall */
-	}
-	if (fk) {
-		dist += (3 * CAM_DIST_PER_TILE - dist) * fk >> 8;
-		pan_x += (fin_x - pan_x) * fk >> 8;
-		look_z += (fin_z + 60 - look_z) * fk >> 8;
-	}
-	cam_x = kick_x + pan_x;
-	cam_y = -(dist * sp >> 12);
-	cam_z = look_z - (dist * cp >> 12) + kick_z;
+	int sp = isin(pitch), cp = icos(pitch), sy = isin(yaw), cy = icos(yaw);
+	/* Rows: camera right, down and forward, in world axes. */
+	cam.m[0][0] = cy;              cam.m[0][1] = 0;  cam.m[0][2] = -sy;
+	cam.m[1][0] = -(sp * sy >> 12); cam.m[1][1] = cp; cam.m[1][2] = -(sp * cy >> 12);
+	cam.m[2][0] = cp * sy >> 12;   cam.m[2][1] = sp; cam.m[2][2] = cp * cy >> 12;
+	cam_x = tx - (dist * cam.m[2][0] >> 12) + kick_x;
+	cam_y = ty - (dist * sp >> 12);
+	cam_z = tz - (dist * cam.m[2][2] >> 12) + kick_z;
 	if (shake_t > 0) {
 		cam_x += (frame & 1) ? shake_t * 2 : -shake_t * 2;
 		cam_y += (frame & 2) ? shake_t : -shake_t;
@@ -356,11 +388,6 @@ static void update_camera(int frame) {
 	kick_x = kick_x * 3 / 4;
 	kick_z = kick_z * 3 / 4;
 	zoom = zoom * 7 / 8;
-
-	/* Rows: camera right, down and forward, in world axes (facing +z). */
-	cam.m[0][0] = 4096; cam.m[0][1] = 0;  cam.m[0][2] = 0;
-	cam.m[1][0] = 0;    cam.m[1][1] = cp; cam.m[1][2] = -sp;
-	cam.m[2][0] = 0;    cam.m[2][1] = sp; cam.m[2][2] = cp;
 	for (int r = 0; r < 3; r++)
 		cam.t[r] = -((cam.m[r][0] * cam_x + cam.m[r][1] * cam_y + cam.m[r][2] * cam_z) >> 12);
 	load_matrix(&cam);
@@ -379,8 +406,9 @@ static void sprite(uint32_t *s, int cx, int cy, int hw, int hh, int fx, int clut
 	if (flip & 1) { int t = u0; u0 = u1; u1 = t; }
 	if (flip & 2) { int t = v0; v0 = v1; v1 = t; }
 	setUV4(q, u0, v0, u1, v0, u0, v1, u1, v1);
+	if (add) ink(&r, &g, &b);
 	setRGB0(q, r, g, b);
-	q->tpage = add ? fig_tpage_add : fig_tpage;
+	q->tpage = add ? fig_tpage_sub : fig_tpage;
 	q->clut = fig_clut[clut];
 	if (add) setSemiTrans(q, 1);
 	addPrim(s, q);
@@ -408,8 +436,8 @@ static void update_weather(int frame) {
 }
 
 static void draw_sky(int frame) {
-	int top[3] = { SKY_TOP.r + flash / 3, SKY_TOP.g + flash / 3, SKY_TOP.b + flash * 2 / 5 };
-	int bot[3] = { SKY_BOTTOM.r + flash / 8, SKY_BOTTOM.g + flash / 8, SKY_BOTTOM.b + flash / 7 };
+	int top[3] = { SKY_TOP.r - flash / 4, SKY_TOP.g - flash / 4, SKY_TOP.b - flash / 5 };   /* (lightning: ink washed over the sky) */
+	int bot[3] = { SKY_BOTTOM.r - flash / 8, SKY_BOTTOM.g - flash / 8, SKY_BOTTOM.b - flash / 8 };
 	grade(&top[0], &top[1], &top[2]);
 	grade(&bot[0], &bot[1], &bot[2]);
 	POLY_G4 *q = (POLY_G4 *)prim;
@@ -625,12 +653,14 @@ static int soul_light_at(int x, int z) {
 
 /* The floor's light at a point (0..~300 a channel, 128 = plain). */
 static void floor_light(int x, int z, int *r, int *g, int *b) {
-	int l = AMBIENT + soul_light_at(x, z) + flash / 2;
-	*r = *g = l * 128 >> 8;
-	*b = *g + 6;
+	int l = AMBIENT + (soul_light_at(x, z) >> 4);
+	*r = *g = *b = l * 128 >> 8;
+	/* (lights stain the paper with their hue: the other colours taken away) */
 	for (int i = 0; i < nlit; i++) {
 		int k = light_reach(i, x, z);
-		*r += lit[i].r * k >> 9; *g += lit[i].g * k >> 9; *b += lit[i].b * k >> 9;
+		int lr = lit[i].r, lg = lit[i].g, lb = lit[i].b;
+		ink(&lr, &lg, &lb);
+		*r -= lr * k >> 10; *g -= lg * k >> 10; *b -= lb * k >> 10;
 	}
 }
 
@@ -644,6 +674,9 @@ static int fig_dir[3][3], fig_col[3][3], fig_bk[3];
 static int model_red;          /* the telegraph's red under the figure, 0..256 */
 static int model_ghost;        /* an afterimage: textured faces only, added light */
 static int model_glow = 256;   /* how bright its glowing parts are */
+static int model_erase;        /* unfinished: how much of it is rubbed out, 0..256 */
+static int model_boil;         /* drawn by hand: its lines tremble from frame to frame */
+static int boil_frame;
 /* Statues never move: their lit colours are worked out once and kept here
  * (a face's four corners), only brightened by lightning after that. */
 static uint8_t (*face_cache)[4][3];
@@ -765,12 +798,19 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 		for (int i = 0; i < nverts; i++) {
 			project(pt->verts[i].x, pt->verts[i].y, pt->verts[i].z, &pv[i]);
 			vdone[i] = 0;
+			if (model_boil) {
+				int h = (i * 7 + pi * 5 + (boil_frame / 6) * 13) % 5;
+				pv[i].x += h - 2;
+				pv[i].y += (h * 3) % 3 - 1;
+			}
 		}
 		for (int fi = 0; fi < pt->nfaces; fi++) {
 			const MFace *f = &pt->faces[fi];
 			int tri = f->v[3] == 255, nv = tri ? 3 : 4;
 			Proj p[4] = { pv[f->v[0]], pv[f->v[1]], pv[f->v[2]], tri ? pv[f->v[2]] : pv[f->v[3]] };
 			uint8_t (*cached)[3] = face_cache ? face_cache[cfi++] : 0;
+			/* Rubbed out, a piece at a time (the same pieces each frame). */
+			if (model_erase && (((pi * 31 + fi * 17) * 2654435761u) >> 24) < (unsigned)model_erase) continue;
 			if (!front(&p[0], &p[1], &p[2]) || !on_screen(p, nv)) continue;
 			if (prim + sizeof(POLY_GT4) > prim_end) break;
 			int col[4][3];
@@ -802,7 +842,7 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 			int nc = f->smooth ? nv : 1;
 			for (int k = 0; k < nc; k++) {
 				int r = f->r * cl[k].r >> 6, g2 = f->g * cl[k].g >> 6, b = f->b * cl[k].b >> 6;
-				if (tint == 1) { r = g2 = b = 240; }
+				if (tint == 1) { r = g2 = b = is_soul ? 240 : 24; }   /* (struck: a stroke of ink) */
 				else if (tint == 2) { r = r / 2 + 140; g2 /= 3; b /= 3; }
 				else if (tint == 3) { r = r * 3 / 4; g2 = g2 * 4 / 5; b = b + 36; }
 				if (fade < 256) { r = r * fade >> 8; g2 = g2 * fade >> 8; b = b * fade >> 8; }
@@ -823,9 +863,9 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 				setRGB0(q, col[0][0], col[0][1], col[0][2]);
 				setRGB1(q, col[1][0], col[1][1], col[1][2]);
 				setRGB2(q, col[2][0], col[2][1], col[2][2]);
-				q->tpage = model_ghost ? fig_tpage_add : fig_tpage;
+				q->tpage = model_ghost ? fig_tpage_sub : fig_tpage;
 				if (model_ghost) setSemiTrans(q, 1);
-				q->clut = fig_clut[f->mat];
+				q->clut = fig_clut[f->mat == MAT_ROBE && !is_soul ? CLUT_SKETCH : f->mat];
 				addPrim(slot(z), q);
 				prim += sizeof(POLY_GT3);
 			} else if (f->mat >= 0) {
@@ -837,9 +877,9 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 				setRGB1(q, col[1][0], col[1][1], col[1][2]);
 				setRGB2(q, col[2][0], col[2][1], col[2][2]);
 				setRGB3(q, col[3][0], col[3][1], col[3][2]);
-				q->tpage = model_ghost ? fig_tpage_add : fig_tpage;
+				q->tpage = model_ghost ? fig_tpage_sub : fig_tpage;
 				if (model_ghost) setSemiTrans(q, 1);
-				q->clut = fig_clut[f->mat];
+				q->clut = fig_clut[f->mat == MAT_ROBE && !is_soul ? CLUT_SKETCH : f->mat];
 				addPrim(slot(z), q);
 				prim += sizeof(POLY_GT4);
 			} else if (model_ghost) {
@@ -877,6 +917,7 @@ static void ground_glow(int x, int z, int r, int bright) {
 	project(x - r, -3, z - r, &p[2]);
 	project(x + r, -3, z - r, &p[3]);
 	if (!on_screen(p, 4) || prim + sizeof(POLY_FT4) > prim_end || bright <= 0) return;
+	return;   /* (no light on paper: kept for its place in the order) */
 	POLY_FT4 *q = (POLY_FT4 *)prim;
 	setPolyFT4(q);
 	setSemiTrans(q, 1);
@@ -887,6 +928,30 @@ static void ground_glow(int x, int z, int r, int bright) {
 	q->tpage = fig_tpage_add;
 	q->clut = fig_clut[CLUT_GLOW];
 	addPrim(slot(p[0].z) - 1, q);
+	prim += sizeof(POLY_FT4);
+}
+
+/* A blot of ink on the floor: the chunk's ragged shape, subtracted;
+ * amount: how dark, flip: which way it lies. */
+static void blot(int x, int z, int r, int amount, int flip) {
+	Proj p[4];
+	project(x - r, -2, z + r, &p[0]);
+	project(x + r, -2, z + r, &p[1]);
+	project(x - r, -2, z - r, &p[2]);
+	project(x + r, -2, z - r, &p[3]);
+	if (!on_screen(p, 4) || prim + sizeof(POLY_FT4) > prim_end || amount <= 0) return;
+	POLY_FT4 *q = (POLY_FT4 *)prim;
+	setPolyFT4(q);
+	setSemiTrans(q, 1);
+	setXY4(q, p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y, p[3].x, p[3].y);
+	int u0 = FX_CHUNK * 64, u1 = u0 + 63, v0 = 64, v1 = 127;
+	if (flip & 1) { int t = u0; u0 = u1; u1 = t; }
+	if (flip & 2) { int t = v0; v0 = v1; v1 = t; }
+	setUV4(q, u0, v0, u1, v0, u0, v1, u1, v1);
+	setRGB0(q, amount, amount, amount * 7 / 8);
+	q->tpage = fig_tpage_sub;
+	q->clut = fig_clut[CLUT_GLOW];
+	addPrim(slot(p[0].z) - 2, q);
 	prim += sizeof(POLY_FT4);
 }
 
@@ -1016,14 +1081,10 @@ static void draw_floor(int frame) {
 					int nx = tx + (i & 1 ? 1 : -1), ny = ty + (i < 2 ? -1 : 1);
 					if (nx >= 0 && nx < n && tele[ty][nx] / 6 > red) red = tele[ty][nx] / 6;
 					if (ny >= 0 && ny < n && tele[ny][tx] / 6 > red) red = tele[ny][tx] / 6;
-					if (grab_tile[ty][tx]) { r += red / 3; g -= red / 3; bb += red; }   /* purple */
-					else { r += red; g -= red / 4; bb -= red / 4; }
+					if (grab_tile[ty][tx]) { g -= red * 2 / 3; r -= red / 4; }   /* purple ink */
+					else { g -= red * 2 / 3; bb -= red * 2 / 3; }
 				}
-				if (own && (frame & 4)) { r += 90; g -= 30; bb -= 30; }   /* your own tile flashes */
-				if (t[i].z > FOG_NEAR) {
-					int f = 256 - fog_of(t[i].z);
-					r = r * f >> 8; g = g * f >> 8; bb = bb * f >> 8;
-				}
+				if (own && (frame & 4)) { g -= 50; bb -= 50; }   /* your own tile flashes */
 				col[i][0] = clamp255(r); col[i][1] = clamp255(g); col[i][2] = clamp255(bb);
 			}
 			int zmax = t[0].z;
@@ -1039,7 +1100,9 @@ static void draw_floor(int frame) {
 			setRGB2(q, col[2][0], col[2][1], col[2][2]);
 			setRGB3(q, col[3][0], col[3][1], col[3][2]);
 			q->tpage = slab_tpage;
-			q->clut = slab_clut[grab_tile[ty][tx] ? 0 : tg >= 256 || (sl < 0 && sl > -40) ? 2 : tg > 0 || sl < 0 ? 1 : 0];
+			/* Further off, the page is only pencil, then nearly blank. */
+			int far = fog_of(zmax), near_c = far < 70 ? 0 : far < 170 ? 3 : 4;
+			q->clut = slab_clut[grab_tile[ty][tx] ? near_c : tg >= 256 || (sl < 0 && sl > -40) ? 2 : tg > 0 || sl < 0 ? 1 : near_c];
 			addPrim(s, q);
 			prim += sizeof(POLY_GT4);
 			/* Cracked by a heavy blow: dark lines across it, fading. */
@@ -1066,10 +1129,16 @@ static void draw_floor(int frame) {
 				setPolyG4(g);
 				setXY4(g, a->x, a->y, bb->x, bb->y, c->x, c->y, d->x, d->y);
 				const int *c0 = col[CI[sd][0]], *c1 = col[CI[sd][1]];
-				setRGB0(g, c0[0] * 2 / 5, c0[1] * 2 / 5, c0[2] * 2 / 5);
-				setRGB1(g, c1[0] * 2 / 5, c1[1] * 2 / 5, c1[2] * 2 / 5);
-				setRGB2(g, c0[0] / 8, c0[1] / 8, c0[2] / 8);
-				setRGB3(g, c1[0] / 8, c1[1] / 8, c1[2] / 8);
+				/* (the sheet's edge: a pencil grey under the paper, fading off) */
+				int e0[3], e1[3], f = fog_of(zmax);
+				for (int c = 0; c < 3; c++) {
+					e0[c] = c0[c] * 3 / 2; e1[c] = c1[c] * 3 / 2;
+					e0[c] += ((&FOG.r)[c] - e0[c]) * f >> 8; e1[c] += ((&FOG.r)[c] - e1[c]) * f >> 8;
+				}
+				setRGB0(g, e0[0] * 3 / 4, e0[1] * 3 / 4, e0[2] * 3 / 4);
+				setRGB1(g, e1[0] * 3 / 4, e1[1] * 3 / 4, e1[2] * 3 / 4);
+				setRGB2(g, e0[0] * 9 / 10, e0[1] * 9 / 10, e0[2] * 9 / 10);
+				setRGB3(g, e1[0] * 9 / 10, e1[1] * 9 / 10, e1[2] * 9 / 10);
 				addPrim(slot(zmax + 24), g);
 				prim += sizeof(POLY_G4);
 			}
@@ -1257,7 +1326,8 @@ static void draw_particles(int frame) {
 		}
 		if (sz < 1) sz = 1;
 		if (sz > 6) sz = 6;
-		int r = p->r * 3 / 4, g = p->g * 3 / 4, b = p->b * 3 / 4;
+		/* (drops of ink: the colour darkened right down) */
+		int r = p->r / 4, g = p->g / 4, b = p->b / 4;
 		fogged(&r, &g, &b, s.z);
 		TILE *t = (TILE *)prim;
 		setTile(t);
@@ -1279,6 +1349,7 @@ static void glyph(uint32_t *s, int g, int cx, int cy, int size, int r, int gr, i
 	setXY4(q, cx - h, cy - h, cx - h + size, cy - h, cx - h, cy - h + size, cx - h + size, cy - h + size);
 	int u = (g % 15) * 16, v = (g / 15) * 16;
 	setUV4(q, u, v, u + 16, v, u, v + 16, u + 16, v + 16);
+	if (glow) ink(&r, &gr, &b);
 	setRGB0(q, r >> 1, gr >> 1, b >> 1);
 	q->tpage = glyph_tpage;
 	q->clut = glyph_clut;
@@ -1310,20 +1381,20 @@ static void draw_hud(int frame) {
 	ui_begin(ot, prim, prim_end);
 	/* The boss's entrance is a scene of its own: no HUD over the letterbox. */
 	if (floor_state == F_BOSS_INTRO) goto scene;
-	panel(6, 5, 148, 25, 1);
-	/* Health: what a blow took stays pale while it can still be won back
-	 * (rally: strike back), fading at the end. */
-	bar(11, 9, 100, 7, p->hp, HP_MAX, 200, 36, 30, 0);
+	paper_panel(6, 5, 148, 25, 1);
+	/* Ink: the soul's life. What a blow spilled stays as a wet grey while
+	 * it can still be won back, drying away at the end. */
+	ink_bar(11, 9, 100, 7, p->hp, HP_MAX, 22, 20, 30, 0);
 	if (p->rally > 0 && p->rally_t > 0) {
 		int k = p->rally_t > 40 ? 256 : p->rally_t * 256 / 40;
 		int top = p->hp + p->rally > HP_MAX ? HP_MAX : p->hp + p->rally;
-		bar(11, 9, 100, 7, top, HP_MAX, 120 + 115 * k / 256, 60 + 145 * k / 256, 50 + 130 * k / 256, 0);
+		ink_bar(11, 9, 100, 7, top, HP_MAX, 200 - 90 * k / 256, 194 - 90 * k / 256, 186 - 70 * k / 256, 0);
 	}
 	/* Stamina: flashes red when an action wanted more than there was. */
 	if (tired_t > 0 && ticked_frame) tired_t--;
 	int tired = tired_t > 0 && (tired_t & 4);
-	bar(11, 19, 100, 6, p->stamina, STAMINA_MAX * 16, 150, 170, 80, 0);
-	if (tired) box2d(0, 11, 19, 100, 6, 160, 30, 24);
+	ink_bar(11, 19, 100, 6, p->stamina, STAMINA_MAX * 16, 120, 92, 56, 0);
+	if (tired) box2d(0, 11, 19, 100, 6, 170, 30, 24);
 	prim = ui_end();
 	for (int i = 0; i < 3; i++)
 		glyph(ot, G_FLASK, 122 + i * 11, 17, 14, i < p->flasks ? 120 : 30, i < p->flasks ? 200 : 34, i < p->flasks ? 170 : 40, 0);
@@ -1331,12 +1402,12 @@ static void draw_hud(int frame) {
 	int fl = 15 + ((frame * 7) % 5 == 0) + (isin((frame * 150) & 4095) >> 11);
 	glyph(ot, G_FLAME, 262, 16 - (fl - 15), fl, 240, 170 + (isin((frame * 90) & 4095) >> 8), 70, 0);
 	ui_begin(ot, prim, prim_end);
-	panel(250, 5, 64, 25, 1);
+	paper_panel(250, 5, 64, 25, 1);
 	sprintf(line, "%d", absolution);
-	text(306, 10, line, FONT_SMALL, 230, 205, 150, 2, 0);
+	text(306, 10, line, FONT_SMALL, 40, 34, 40, 2, 0);
 	if ((floor_state == F_FIGHT || floor_state == F_WAVE_INTRO) && boss < 0) {
 		sprintf(line, "WAVE %s", ROMAN[wave < 3 ? wave : 2]);
-		text(202, 11, line, FONT_SMALL, 170, 160, 150, 1, 0);
+		text(202, 11, line, FONT_SMALL, 50, 44, 50, 1, 0);
 	}
 	/* Damage over the fight, rising and fading; "BROKEN" over a broken husk. */
 	for (int i = 0; i < MAX_POPS && !hud_quiet; i++) {
@@ -1348,16 +1419,19 @@ static void draw_hud(int frame) {
 		if (p.z <= NEAR_Z) continue;
 		int f = t < 36 ? 256 : (50 - t) * 256 / 14;
 		if (k == POP_BROKEN) {
-			text(p.x, p.y - 12, "BROKEN", FONT_SMALL, 160 * f >> 8, 200 * f >> 8, 255 * f >> 8, 1, 0);
+			text(p.x, p.y - 12, "BROKEN", FONT_SMALL, 40, 60, 140, 1, 0);
 		} else if (k >= POP_FINISHED) {
 			static const char *W[] = { "FINISHED", "BACKSTAB", "CAUGHT" };
-			static const uint8_t C[3][3] = { { 255, 215, 140 }, { 255, 140, 110 }, { 200, 150, 255 } };
+			static const uint8_t C[3][3] = { { 30, 26, 34 }, { 150, 20, 16 }, { 90, 30, 120 } };
 			const uint8_t *c = C[k - POP_FINISHED];
-			text(p.x, p.y - 24, W[k - POP_FINISHED], k == POP_FINISHED ? FONT_LARGE : FONT_SMALL, c[0] * f >> 8, c[1] * f >> 8, c[2] * f >> 8, 1, 0);
+			(void)f;
+			text(p.x, p.y - 24, W[k - POP_FINISHED], k == POP_FINISHED ? FONT_LARGE : FONT_SMALL, c[0], c[1], c[2], 1, 0);
 		} else {
 			sprintf(line, "%d", pops[i].v);
-			int r = 235, g = k == POP_RIPOSTE ? 190 : k == POP_HEAVY ? 170 : 225, b = k == POP_RIPOSTE ? 80 : k == POP_HEAVY ? 110 : 205;
-			text(p.x + (i & 1 ? 10 : -10), p.y, line, k == POP_HIT ? FONT_SMALL : FONT_LARGE, r * f >> 8, g * f >> 8, b * f >> 8, 1, 0);
+			/* (in ink: red for the blows that count most) */
+			int r = k == POP_HIT ? 40 : 150, g = k == POP_HIT ? 36 : 24, b = k == POP_HIT ? 44 : 20;
+			if (t > 36) continue;   /* (ink can't fade: it's gone) */
+			text(p.x + (i & 1 ? 10 : -10), p.y, line, k == POP_HIT ? FONT_SMALL : FONT_LARGE, r, g, b, 1, 0);
 		}
 	}
 scene:
@@ -1573,6 +1647,9 @@ static void handle_events(void) {
 		case EV_RALLY:
 			light_tile(e->x, e->y, 230, 200, 170, 14, 8);
 			break;
+		case EV_INK:   /* the spilled ink drawn back up into the soul */
+			burst(e->x, e->y, 18, 60, 60, 80, 8, 160);
+			break;
 		case EV_BROKEN:   /* the husk's guard shatters: pale blue shards */
 			pop(e->x, e->y, 0, POP_BROKEN);
 			burst(e->x, e->y, 16, 150, 190, 255, 12, 180);
@@ -1734,6 +1811,22 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		if (p.z > NEAR_Z) glyph(slot(p.z) - 1, G_FLAME, p.x, p.y, 110 * SCREEN_H / p.z, 255 * k >> 8, 190 * k >> 8, 70 * k >> 8, 1);
 	}
 
+	/* The soul's spilled ink, wet while it can still be taken back,
+	 * drying (paler) as the time runs out; and drops from it when low. */
+	boil_frame = frame;
+	if (player.rally > 0 && player.rally_t > 0 && floor_state != F_DEAD) {
+		int x, z, k = player.rally_t > 60 ? 256 : player.rally_t * 256 / 60;
+		tile_world(player.ink_x * 16, player.ink_y * 16, &x, &z);
+		int big = 80 + player.rally * 2;
+		if (big > 150) big = 150;
+		int wet = (190 + (isin((frame * 40) & 4095) >> 9)) * k >> 8;
+		blot(x, z, big, wet, 0);
+		blot(x + 40, z - 30, big * 2 / 3, wet, 3);
+		blot(x - 50, z + 20, big / 2, wet, 1);
+	}
+	if (ticked && player.hp > 0 && player.hp <= 30 && player.state != P_DEAD && (frame & 7) == 0)
+		spawn(PK_ASH, soul_x + prand(60) - 30, -60 - prand(80), soul_z + prand(60) - 30, 0, 4, 0, 24, 40, 40, 60, 6, 1);
+
 	/* The husks. */
 	for (int i = 0; i < MAX_ENEMIES; i++) {
 		const Enemy *e = &enemies[i];
@@ -1778,7 +1871,16 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 					      60, k ? 255 : 120, k ? 140 : 116, k ? 60 : 110, 10 + prand(10), 0);
 			model_glow = t < 100 ? 40 : 256;
 		}
+		/* Unfinished sketches: the more it's hurt, the more of it is rubbed
+		 * out; its lines never quite hold still. */
+		{
+			int hp_max = e->kind == K_BELL ? BELL_HP_MAX : e->kind == K_UNFINISHED ? BOSS_HP : HUSK_HP_MAX;
+			int left = e->hp <= 0 ? 0 : e->hp >= hp_max ? 256 : e->hp * 256 / hp_max;
+			model_erase = (256 - left) * 150 >> 8;
+		}
+		model_boil = 1;
 		draw_model(model, &ps, x, wy, z, enemy_yaw[i], 256, tint, fade, 0);
+		model_erase = model_boil = 0;
 		model_glow = 256;
 		if (!wy && fade > 128) shadow(x, z, e->kind == K_BELL ? 80 : e->kind == K_UNFINISHED ? 200 : 110);
 		/* Locked on (R2): pale corners around it. */

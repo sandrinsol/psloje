@@ -148,6 +148,21 @@ husk; any hit on a broken husk is a riposte, 3x damage.
   swell on a riposte and when a floor falls silent. The music dies away when
   the soul falls and is quieter while paused.
 
+## Identity: ink and paper, third person (prototype)
+- The player found the game generic. Chosen: keep the grid and the shrinking
+  floor; put the camera low behind the soul (over its right shoulder),
+  controls relative to it (quarter turns: right stick, L2 behind the soul;
+  it follows the lock-on, and the boss); ink and paper for the look; ink is
+  health; enemies are unfinished sketches.
+- Paper: no light can shine, so every glow is drawn as subtracted ink of its
+  hue; the fog is the blank page (the far slabs switch to pencil and blank
+  CLUTs rather than darken).
+- Ink pools: a blow spills the soul's ink on the tile where it stood (the
+  rally amount); step off and back on while it's wet (RALLY_FRAMES, now 240)
+  for all of it. Striking back still wins half of each blow.
+- Sketches: enemy faces are skipped in proportion to the damage taken (up
+  to ~60%), the same faces every frame; vertices jitter every 6 frames.
+
 ## Story
 - Drafted and approved: docs/story.md (Rowan, the bell-keeper of Saltmere).
 - Floor 1: the opening lines, the Unfinished's entrance, Memory I ("A broken

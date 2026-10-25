@@ -1,19 +1,21 @@
 #!/usr/bin/env node
-// The floor's stone slabs: four 64 x 64 slabs of worn stone, each with a
-// carved rune, in assets/slabs.tim (4-bit, 256 x 64 at VRAM SLAB_X, SLAB_Y)
-// with three CLUTs: normal, faintly glowing runes (a warning) and burning
-// runes (about to be hit). Writes the ids to src/slabs.h.
+// The floor's slabs: four 64 x 64 sheets of paper, each with a rune
+// brushed in ink, in assets/slabs.tim (4-bit, 256 x 64 at VRAM SLAB_X,
+// SLAB_Y) with five CLUTs: normal, the rune in red ink (a warning), the
+// sheet washed red (about to be hit), and two fainter (further off: the
+// page not yet inked, only pencil). Writes the ids to src/slabs.h.
 //
 //   node tools/makeslabs.mjs
 //
-// Colour indices: 1-7 stone (dark to light), 8 joint/crack, 9-11 the rune's
-// carving (edge, groove, deep), 12-15 spare.
+// Colour indices: 1-7 paper (dark to light grain), 8 the sheet's inked
+// edge and creases, 9-11 the rune's ink (dry edge, stroke, wet middle),
+// 12-15 spare.
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SLAB_X = 704, SLAB_Y = 0, CLUT_X = 0, CLUT_Y = 481;
+const SLAB_X = 704, SLAB_Y = 0, CLUT_X = 0, CLUT_Y = 493;
 const S = 64, N = 4;
 
 let seed = 7;
@@ -30,29 +32,39 @@ const RUNES = [
 const px = new Uint8Array(N * S * S);
 for (let k = 0; k < N; k++) {
   const at = (x, y) => k * S + y * S * N + x;   // 256-wide image: slab k at u = k * 64
-  // Stone: blotchy shades, darker towards the edges, a few cracks.
+  // Paper: fine grain, a hand-drawn border that wobbles, a crease or two.
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let v = 5 + (rnd() < 0.5 ? 1 : 0) + (rnd() < 0.12 ? -1 : 0) + (rnd() < 0.05 ? 1 : 0);
     const edge = Math.min(x, y, S - 1 - x, S - 1 - y);
-    let v = 4 + Math.floor(rnd() * 3) - (edge < 2 ? 2 : edge < 5 ? 1 : 0);
-    if (((x * 7 + y * 3 + k * 11) % 23 === 0) && rnd() < 0.5) v -= 1;
+    if (edge < 3) v -= 1;   // the sheet a touch greyer at its edge
     px[at(x, y)] = Math.max(1, Math.min(7, v));
   }
-  for (let c = 0; c < 2; c++) {
-    let x = 4 + Math.floor(rnd() * 56), y = rnd() < 0.5 ? 1 : 62;
-    for (let i = 0; i < 18; i++) {
+  const wob = (i) => Math.round(Math.sin(i / 7 + k * 2) * 0.8 + Math.sin(i / 3 + k) * 0.4);
+  for (let i = 0; i < S; i++) {
+    if (rnd() < 0.93) px[at(i, 1 + wob(i))] = 8;
+    if (rnd() < 0.93) px[at(i, S - 2 + wob(i + 9))] = 8;
+    if (rnd() < 0.93) px[at(1 + wob(i + 5), i)] = 8;
+    if (rnd() < 0.93) px[at(S - 2 + wob(i + 13), i)] = 8;
+  }
+  for (let c = 0; c < 1; c++) {   // a fold across a corner, in pencil
+    let x = 4 + Math.floor(rnd() * 20), y = 3;
+    for (let i = 0; i < 26; i++) {
       if (x < 0 || x >= S || y < 0 || y >= S) break;
-      px[at(x, y)] = 8;
-      x += Math.floor(rnd() * 3) - 1;
-      y += y < 32 ? 1 : -1;
+      if (i % 3) px[at(x, y)] = 4;
+      x += rnd() < 0.6 ? 1 : 0; y += 1;
     }
   }
-  // The rune: carved strokes 3 px wide (deep middle, groove, edge).
+  // The rune: brush strokes, thick in the middle, thinning and dry at
+  // their ends (wet middle, stroke, dry edge).
   const carve = (x0, y0, x1, y1) => {
     const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 4;
     for (let i = 0; i <= n; i++) {
       const cx = 8 + (x0 + (x1 - x0) * i / n) * 3, cy = 8 + (y0 + (y1 - y0) * i / n) * 3;
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-        const x = Math.round(cx + dx), y = Math.round(cy + dy), d = Math.max(Math.abs(dx), Math.abs(dy));
+      const w = i / n < 0.12 || i / n > 0.88 ? 1 : 2;
+      for (let dy = -w; dy <= w; dy++) for (let dx = -w; dx <= w; dx++) {
+        if (w === 2 && Math.abs(dx) === 2 && Math.abs(dy) === 2) continue;
+        if (w === 1 && rnd() < 0.3) continue;   // dry brush
+        const x = Math.round(cx + dx), y = Math.round(cy + dy), d = Math.max(Math.abs(dx), Math.abs(dy)) + (w === 1 ? 1 : 0);
         if (x < 0 || y < 0 || x >= S || y >= S) continue;
         const want = d === 0 ? 11 : d === 1 ? 10 : 9;
         if (px[at(x, y)] < 9 || want > px[at(x, y)]) px[at(x, y)] = Math.max(px[at(x, y)] >= 9 ? px[at(x, y)] : 0, want);
@@ -63,14 +75,21 @@ for (let k = 0; k < N; k++) {
 }
 
 const to15 = ([r, g, b]) => ((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10)) || 0x0421;
-const stone = [[52, 50, 48], [70, 67, 64], [86, 82, 78], [100, 96, 91], [114, 110, 104], [128, 123, 116], [142, 137, 129]];
+const paper = [[176, 168, 150], [192, 184, 166], [206, 198, 180], [216, 208, 190], [224, 216, 198], [232, 224, 206], [240, 233, 216]];
+const ink = [[48, 44, 52], [30, 28, 36], [16, 14, 22]];
+const toward = (c, t, k) => c.map((v, i) => Math.round(v + (t[i] - v) * k));
+const blank = [236, 229, 212];
 const CLUTS = [
-  // normal: the rune a darker groove
-  [[0, 0, 0], ...stone, [40, 38, 36], [66, 62, 58], [48, 45, 42], [34, 32, 30], ...Array(4).fill([0, 0, 0])],
-  // warning: embers in the groove
-  [[0, 0, 0], ...stone, [40, 38, 36], [110, 46, 36], [150, 50, 30], [190, 60, 30], ...Array(4).fill([0, 0, 0])],
-  // about to land: the rune burns, the stone reddens
-  [[0, 0, 0], ...stone.map(([r, g, b]) => [Math.min(255, r + 40), g - 6, b - 10]), [70, 30, 24], [255, 150, 60], [255, 210, 120], [255, 250, 200], ...Array(4).fill([0, 0, 0])],
+  // normal: the rune in ink
+  [[0, 0, 0], ...paper, [70, 64, 70], ...ink, ...Array(4).fill([0, 0, 0])],
+  // warning: the rune in red ink
+  [[0, 0, 0], ...paper, [90, 40, 40], [170, 60, 50], [150, 30, 26], [120, 14, 12], ...Array(4).fill([0, 0, 0])],
+  // about to land: the sheet washed red, the rune bleeding
+  [[0, 0, 0], ...paper.map((c) => toward(c, [230, 120, 100], 0.55)), [110, 20, 18], [150, 20, 16], [120, 8, 8], [90, 0, 0], ...Array(4).fill([0, 0, 0])],
+  // further off: pencil, not ink yet
+  [[0, 0, 0], ...paper.map((c) => toward(c, blank, 0.5)), [140, 136, 134], ...ink.map((c) => toward(c, [120, 116, 118], 0.7)), ...Array(4).fill([0, 0, 0])],
+  // far off: the page nearly blank
+  [[0, 0, 0], ...paper.map((c) => toward(c, blank, 0.85)), [196, 190, 182], ...ink.map((c) => toward(c, [186, 180, 174], 0.85)), ...Array(4).fill([0, 0, 0])],
 ];
 
 const clutBytes = 12 + 32 * CLUTS.length, imageBytes = 12 + (N * S / 2) * S;
@@ -90,7 +109,7 @@ writeFileSync(path.join(root, 'src', 'slabs.h'), `/* Generated by tools/makeslab
 #define SLAB_TPAGE_X ${SLAB_X}
 #define SLAB_TPAGE_Y ${SLAB_Y}
 #define SLAB_CLUT_X  ${CLUT_X}
-#define SLAB_CLUT_Y  ${CLUT_Y}   /* + 0 normal, + 1 warning, + 2 about to land */
+#define SLAB_CLUT_Y  ${CLUT_Y}   /* + 0 normal, + 1 warning, + 2 about to land, + 3 / + 4 further off */
 #define NUM_SLABS    ${N}        /* slab k at u = k * 64 */
 `);
 console.log(`slabs.tim: ${N} slabs, ${CLUTS.length} CLUTs`);

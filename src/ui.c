@@ -149,6 +149,35 @@ void panel(int x, int y, int w, int h, int layer) {
 	dark_box(x + 3 * e, y + 3 * e, w, h, 60, layer + 2);   /* a soft shadow */
 }
 
+/* A card of paper with a hand-inked edge (the HUD over the page). */
+void paper_panel(int x, int y, int w, int h, int layer) {
+	int e = ui_hires ? 2 : 1;
+	tile(x, y, w, e, 40, 36, 42, layer);
+	tile(x + 1, y + h - e, w - 1, e, 40, 36, 42, layer);
+	tile(x, y + 1, e, h - 1, 40, 36, 42, layer);
+	tile(x + w - e, y, e, h - 1, 40, 36, 42, layer);
+	gradient(x, y, w, h, 240, 234, 218, 222, 213, 194, layer + 1);
+	dark_box(x + 2 * e, y + 2 * e, w, h, 40, layer + 2);   /* a soft shadow */
+}
+
+/* A stroke of ink as a bar, on paper: the stroke ragged at its end. */
+void ink_bar(int x, int y, int w, int h, int value, int max, int r, int g, int b, int layer) {
+	int fill = value <= 0 ? 0 : (w - 2) * value / max;
+	if (fill > 0 && room(sizeof(POLY_G4))) {
+		POLY_G4 *q = (POLY_G4 *)prim;
+		setPolyG4(q);
+		int tail = fill > 4 ? 3 : 0;   /* the brush lifting off */
+		setXY4(q, x + 1, y + 1, x + 1 + fill, y + 1 + (tail ? 1 : 0), x + 1, y + h - 1, x + 1 + fill - tail, y + h - 1);
+		setRGB0(q, r, g, b);
+		setRGB1(q, r * 3 / 2 > 255 ? 255 : r * 3 / 2, g * 3 / 2 > 255 ? 255 : g * 3 / 2, b * 3 / 2 > 255 ? 255 : b * 3 / 2);
+		setRGB2(q, r, g, b);
+		setRGB3(q, r, g, b);
+		addPrim(ot + layer, q);
+		prim += sizeof(POLY_G4);
+	}
+	tile(x, y, w, h, 204, 196, 178, layer + 1);
+}
+
 void gradient(int x, int y, int w, int h, int r0, int g0, int b0, int r1, int g1, int b1, int layer) {
 	if (!room(sizeof(POLY_G4))) return;
 	POLY_G4 *q = (POLY_G4 *)prim;
@@ -233,7 +262,20 @@ void title_draw(int frame, int show_logo) {
 	if (show_logo) {
 		int y = h / 5 + (isin((frame * 8) & 4095) >> 10);
 		logo(w / 2, y, 200 + (isin((frame * 23) & 4095) >> 8), 5);
-		text(w / 2, y + LOGO_H / (ui_hires ? 1 : 2) + 6, "A TRIAL OF SEVEN SINS", ui_hires ? FONT_LARGE : FONT_SMALL, 120, 112, 104, 1, 5);
+		text(w / 2, y + LOGO_H / (ui_hires ? 1 : 2) + 6, "A TRIAL OF SEVEN SINS", ui_hires ? FONT_LARGE : FONT_SMALL, 46, 40, 46, 1, 5);
+		/* A wash of blank paper behind the name, so it reads over the page. */
+		int bh = LOGO_H / (ui_hires ? 1 : 2) + (ui_hires ? 90 : 45);
+		if (room(sizeof(TILE))) {
+			TILE *t = (TILE *)prim;
+			setTile(t);
+			setSemiTrans(t, 1);
+			setXY0(t, 0, y - (ui_hires ? 30 : 15));
+			setWH(t, w, bh);
+			setRGB0(t, 238, 232, 216);
+			addPrim(ot + 6, t);
+			prim += sizeof(TILE);
+			blend(0, 6);   /* half and half */
+		}
 	}
 	/* Ash drifting down over the floor (drawn behind, in 3D). */
 	for (int i = 0; i < 70; i++) {
@@ -242,8 +284,6 @@ void title_draw(int frame, int show_logo) {
 		int c = 60 + (i * 29) % 70, s = ui_hires ? 2 + (i % 3 == 0) : 1 + (i % 4 == 0);
 		tile(x, y, s, s, c, c - 4, c - 6, 6);
 	}
-	/* Darker behind the name and the menu, so they read over the scene. */
-	dark_box(0, 0, w, h, 40, 7);
 }
 
 /* ---- Menus ---------------------------------------------------------------------------------- */
@@ -433,11 +473,11 @@ void menu_draw(int frame) {
 			if (on) tile(cx - pw2 / 2 + (hi ? 4 : 2), y + (hi ? 11 : 5), hi ? 8 : 4, hi ? 8 : 4, 230, 190, 120, 1);
 		}
 		int yb = y0 + NUM_TRIALS * rh + (hi ? 24 : 10);
-		text(cx, yb, TRIAL_TEXTS[sel], hi ? FONT_LARGE : FONT_SMALL, 180, 170, 156, 1, 1);
+		text(cx, yb, TRIAL_TEXTS[sel], hi ? FONT_LARGE : FONT_SMALL, 46, 40, 46, 1, 1);   /* (in ink, on the page) */
 		char best[16] = "--:--";
 		if (record.best_time) time_text(best, record.best_time);
 		sprintf(line, "BEST %s   DESTROYED %d   DEATHS %d", best, record.bosses, (int)record.deaths);
-		text(cx, yb + (hi ? 40 : 18), line, hi ? FONT_LARGE : FONT_SMALL, 140, 132, 124, 1, 1);
+		text(cx, yb + (hi ? 40 : 18), line, hi ? FONT_LARGE : FONT_SMALL, 80, 72, 76, 1, 1);
 		return;
 	}
 
@@ -484,7 +524,7 @@ void menu_draw(int frame) {
 		}
 	}
 	if (menu == MENU_TITLE && (frame & 32))
-		text(cx, SH() - (hi ? 58 : 24), "CROSS: CHOOSE", hi ? FONT_LARGE : FONT_SMALL, 110, 104, 98, 1, 1);
+		text(cx, SH() - (hi ? 58 : 24), "CROSS: CHOOSE", hi ? FONT_LARGE : FONT_SMALL, 70, 64, 68, 1, 1);
 	/* The pause menu darkens the fight behind it. */
 	if (menu != MENU_TITLE && !hi) dark_box(0, 0, SW(), SH(), 110, 6);
 }
