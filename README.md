@@ -29,7 +29,14 @@ the absolution you dropped. Hit-stop, camera kicks, ash bursts and
 synthesised sound effects. When the floor is won its outer ring breaks away.
 Music synthesised for the SPU (a choir, a drone, bells, a heartbeat; a
 title theme and Sloth's floor), whispers and sighs, everything in the SPU's
-hall reverb. 60 fps. No boss or skills yet.
+hall reverb. After the third wave, the boss: **the Unfinished**, a hollow
+giant of half-made things, rises out of the ash (letterbox, the camera
+sweeping in, its name carved, its theme) and fights with blows that come in
+two halves (a ring then a wider ring; every other row, then the rest
+"tomorrow"; a rope lashed out to the edge), faster below half its life.
+Then Memory I, written out over a picture of the bell tower in the rain.
+The story (docs/story.md) opens with a few lines before the first floor.
+60 fps. No skills or later floors yet.
 
 ## Controls
 
@@ -93,4 +100,4 @@ effects, synthesised and encoded as SPU ADPCM).
   60 fps loop and pad input.
 - `tests/ps1/*.json`: ps1-test scripts (moving and facing, death and the
   drop, jumping a slam, the heavy blow, cancels and the analog stick, the
-  sleeper and the bell-ringer), run on every push.
+  sleeper and the bell-ringer, the boss and its memory), run on every push.

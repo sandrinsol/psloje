@@ -75,6 +75,13 @@ husk; any hit on a broken husk is a riposte, 3x damage.
   swell on a riposte and when a floor falls silent. The music dies away when
   the soul falls and is quieter while paused.
 
+## Story
+- Drafted and approved: docs/story.md (Rowan, the bell-keeper of Saltmere).
+- Floor 1: the opening lines, the Unfinished's entrance, Memory I ("A broken
+  promise"), one more line with 5 or more deaths.
+- The boss: the Unfinished (400 hp), after wave III; dying restarts the
+  floor from wave I. Its memory, then back to the title (no floor 2 yet).
+
 ## Milestones
 1. Floor 1 prototype: 9 x 9 grid, dodge-movement, turning, sword, block and
    parry, stamina, flasks, Sloth husks with telegraphs, three waves, death and
