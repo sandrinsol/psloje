@@ -25,7 +25,7 @@
     {"name": "landed", "waitUntil": {"address": "player+20", "as": "s32", "op": "eq", "value": 0}, "maxFrames": 60},
     {"name": "Square held: a charged, heavy blow", "tap": "SQUARE", "hold": 42, "release": 0},
     {"wait": 14},
-    {"name": "the heavy blow hits hard and staggers", "assertRam": "enemies+24", "as": "s32", "equals": 10},
+    {"name": "the heavy blow hits hard and staggers", "assertRam": "enemies+24", "as": "s32", "equals": 50},
     {"assertRam": "enemies", "as": "s32", "equals": 5},
     {"name": "(full health again, to tell a riposte from a plain hit)", "write": "enemies+24", "value": 60, "as": "u32"},
     {"wait": 34},

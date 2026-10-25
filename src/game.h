@@ -47,6 +47,7 @@ typedef struct {
 	int32_t rally, rally_t; /* health a blow just took, won back by hitting back for rally_t frames */
 	int32_t counter_t;      /* after a perfect dodge: the next blow is a riposte */
 	int32_t push_frames;    /* how long this push or drag lasts */
+	int32_t dodge_wait;     /* frames after a dodge before the next can start */
 } Player;
 #define RALLY_FRAMES  180
 
@@ -56,7 +57,9 @@ enum { E_NONE, E_IDLE, E_MOVE, E_WINDUP, E_RECOVER, E_STAGGER, E_DYING, E_SLEEP,
 /* Kinds: Sloth's husk; a husk asleep until you come near; the bell-ringer,
  * who keeps to the floor's edge and rings a whole row or column down. */
 enum { K_HUSK, K_SLEEPER, K_BELL, K_UNFINISHED };
-#define BOSS_HP      400
+#define BOSS_HP      700
+#define HUSK_HP_MAX  100   /* (for the bars over them) */
+#define BELL_HP_MAX  60
 #define BOSS_INTRO   300   /* frames of the boss's entrance */
 
 typedef struct {

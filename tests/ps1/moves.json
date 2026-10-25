@@ -23,7 +23,7 @@
     {"tap": "SQUARE", "hold": 2, "release": 0},
     {"wait": 14},
     {"assertRam": "player+72", "as": "s32", "equals": 2},
-    {"name": "20 + 20 + 35 (the third is the heaviest)", "assertRam": "enemies+24", "as": "s32", "equals": 125},
+    {"name": "20 + 20 + 30 (the third is the heaviest)", "assertRam": "enemies+24", "as": "s32", "equals": 130},
 
     {"wait": 40},
     {"name": "its back to the soul: a backstab, double, and it staggers", "write": "enemies", "hex": "04000000 00000000"},
@@ -55,6 +55,18 @@
     {"waitUntil": {"address": "enemies", "as": "s32", "op": "eq", "value": 4}, "maxFrames": 200},
     {"wait": 20},
     {"assertRam": "player+28", "as": "s32", "equals": 70},
-    {"assertRam": "player+4", "as": "s32", "equals": 6}
+    {"assertRam": "player+4", "as": "s32", "equals": 6},
+
+    {"wait": 60},
+    {"name": "Circle pressed twice, quickly: one dodge, not two (no running off the edge)", "write": "enemies", "hex": "00000000"},
+    {"write": "enemies_alive", "value": 0, "as": "u32"},
+    {"write": "player", "hex": "04000000 04000000 04000000 04000000 01000000 00000000"},
+    {"write": "player+32", "value": 1600, "as": "s32"},
+    {"wait": 2},
+    {"tap": ["RIGHT", "CIRCLE"], "hold": 2, "release": 2},
+    {"tap": ["RIGHT", "CIRCLE"], "hold": 2, "release": 0},
+    {"wait": 40},
+    {"assertRam": "player", "as": "s32", "equals": 6},
+    {"assertRam": "player+20", "as": "s32", "equals": 0}
   ]
 }

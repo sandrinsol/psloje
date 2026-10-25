@@ -27,7 +27,7 @@
     {"wait": 2},
     {"name": "its name carved", "assert": "goldens/boss_intro.png"},
     {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 200},
-    {"assertRam": "enemies+24", "as": "s32", "equals": 400},
+    {"assertRam": "enemies+24", "as": "s32", "equals": 700},
     {"name": "(nearly done for, the soul right below it)", "write": "enemies+24", "value": 10, "as": "u32"},
     {"write": "player", "hex": "04000000 05000000 04000000 05000000 00000000"},
     {"wait": 2},

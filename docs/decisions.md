@@ -47,12 +47,12 @@ What was decided on top of the [design brief](design-brief.md).
 | Button | Action |
 |---|---|
 | D-pad | Walk one tile (20 frames, no stamina), screen directions |
-| Circle + direction | Dodge two tiles that way, over an enemy too (15 frames, 10 invincible, 50 % stamina); one tile if the second is taken; onto nothing: the soul falls |
+| Circle + direction | Dodge two tiles that way, over an enemy too (15 frames, 10 invincible, 50 % stamina); one tile if the second is taken; onto nothing: the soul falls. Circle pressed again during a dodge is ignored, and after one lands the next waits 14 frames (no running off the edge with a double press) |
 | Circle alone | Dodge away from the enemy you face |
 | (automatic) | Face the nearest enemy along a row or column; exactly diagonal: keep facing (not mid-dodge: it turns as it lands) |
 | R2 | Lock on to the next enemy; past the last, back to the nearest |
 | Square | Light swings chain, three at most (20, 20, then 35; the first lands on frame 8). Held 37 frames: a heavy blow (50, breaks a husk), on release; while held, the soul can step at half pace, facing where it was |
-| X | Jump in place (35 frames, airborne 4..26: ground attacks miss; 20 % stamina) |
+| X | Jump in place, high (35 frames, airborne 4..26: ground attacks miss; 20 % stamina) |
 | Triangle | Drink a flask (40 frames standing still; a hit spills it) |
 | L1 / R1 | The two active skills |
 

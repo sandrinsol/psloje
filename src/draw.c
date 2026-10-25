@@ -1786,7 +1786,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 			if (p.z > NEAR_Z) glyph(slot(p.z) - 3, G_CORNERS, p.x, p.y, (e->kind == K_UNFINISHED ? 520 : 330) * SCREEN_H / p.z, 230, 210, 170, 1);
 		}
 		/* Health over it once hurt (the boss's is at the bottom). */
-		int hp_max = e->kind == K_BELL ? 40 : 60;
+		int hp_max = e->kind == K_BELL ? BELL_HP_MAX : HUSK_HP_MAX;
 		if (e->kind != K_UNFINISHED && e->hp < hp_max && e->state != E_DYING) {
 			Proj p;
 			project(x, -270, z, &p);
@@ -1826,7 +1826,8 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		model_glow = 256;
 		/* Off the ground: the shadow shrinks under it. */
 		if (!gone && player.state != P_FALL) {
-			shadow(soul_x, soul_z, 80 + (ps.dy < 0 ? ps.dy / 4 : 0));
+			int sr = 80 + (ps.dy < 0 ? ps.dy / 8 : 0);   /* smaller the higher it is */
+			shadow(soul_x, soul_z, sr < 30 ? 30 : sr);
 			ground_glow(soul_x, soul_z, 210, soul_glow + (isin((game_frames * 60) & 4095) >> 9));   /* a candle's flicker */
 		}
 		/* The sword's arc as it strikes. */

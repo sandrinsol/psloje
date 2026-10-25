@@ -16,7 +16,7 @@
 #define HEAVY_DAMAGE    50     /* and it breaks the husk (staggers it) */
 /* Light swings chain, three at most: { the frame it hits, its length, damage }.
  * The first is quicker than the old single swing; the third is the heaviest. */
-static const int8_t COMBO[3][3] = { { 8, SLOW(22), 20 }, { 7, SLOW(20), 20 }, { 10, SLOW(27), 35 } };
+static const int8_t COMBO[3][3] = { { 8, SLOW(22), 20 }, { 7, SLOW(20), 20 }, { 10, SLOW(27), 30 } };
 #define COMBO_WINDOW    14     /* frames after a light swing ends: the next one carries on the chain */
 #define BACKSTAB_FACTOR 2      /* a blow on an enemy's back, and it staggers */
 #define COUNTER_FRAMES  SLOW(30)   /* after a perfect dodge: a riposte, whoever's hit */
@@ -30,6 +30,7 @@ static const int8_t COMBO[3][3] = { { 8, SLOW(22), 20 }, { 7, SLOW(20), 20 }, { 
 #define FLASK_HEAL      40
 #define FLASKS          3
 #define BUFFER_FRAMES   15     /* a press while busy is kept this long */
+#define DODGE_RECOVER   14     /* after a dodge lands: a moment before the next */
 #define PERFECT_FRAMES  6      /* a dodge this late before a blow lands: perfect */
 #define PERFECT_STAMINA (30 * 16)
 #define WAVE_HEAL       25     /* health back as a wave falls */
@@ -39,7 +40,7 @@ static const int8_t COMBO[3][3] = { { 8, SLOW(22), 20 }, { 7, SLOW(20), 20 }, { 
 #define HEAVY_CANCEL    SLOW(12)
 
 /* Sloth's husk. */
-#define HUSK_HP         60
+#define HUSK_HP         HUSK_HP_MAX
 #define HUSK_DAMAGE     30
 #define HUSK_IDLE       SLOW(50)
 #define HUSK_RECOVER    SLOW(45)
@@ -49,7 +50,7 @@ static const int8_t COMBO[3][3] = { { 8, SLOW(22), 20 }, { 7, SLOW(20), 20 }, { 
 #define WAKE_RANGE      2      /* a sleeper wakes when you come this near (or strike it) */
 #define WAKE_FRAMES     SLOW(45)
 #define SLEEP_FACTOR    2      /* a blow on a sleeper */
-#define BELL_HP         40
+#define BELL_HP         BELL_HP_MAX
 #define BELL_IDLE       SLOW(40)
 #define BELL_WINDUP     SLOW(80)   /* four tolls */
 #define BELL_RECOVER    SLOW(50)
@@ -555,6 +556,7 @@ static void update_player(const Input *in) {
 	if (p->hurt_t < 999) p->hurt_t++;
 	if (p->buffer_t > 0 && --p->buffer_t == 0) p->buffered = BUF_NONE;
 	if (p->combo_t < 999) p->combo_t++;
+	if (p->dodge_wait > 0) p->dodge_wait--;
 	if (p->counter_t > 0) p->counter_t--;
 	if (p->rally_t > 0 && --p->rally_t == 0) p->rally = 0;
 	if (p->state == P_DEAD)
@@ -582,7 +584,8 @@ static void update_player(const Input *in) {
 	int held_dir = dir_of(in->held);
 
 	/* Wanted this frame (or buffered while busy). */
-	if (in->pressed & PAD_CIRCLE) {
+	/* (Circle pressed again mid-dodge is ignored: no second dodge on top.) */
+	if ((in->pressed & PAD_CIRCLE) && p->state != P_DODGE) {
 		p->buffered = BUF_DODGE;
 		p->buffer_t = BUFFER_FRAMES;
 		p->buffer_dir = held_dir;   /* a direction held: dodge that way, else away from the enemy */
@@ -607,6 +610,7 @@ static void update_player(const Input *in) {
 				return;
 			}
 			p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y;
+			p->dodge_wait = DODGE_RECOVER;
 		}
 		break;
 	case P_WALK:
@@ -679,8 +683,12 @@ static void update_player(const Input *in) {
 
 	if (p->state == P_IDLE) {
 		if (p->buffered == BUF_DODGE) {
-			try_dodge(p->buffer_dir >= 0 ? p->buffer_dir : (p->facing + 2) & 3);
-			p->buffered = BUF_NONE;
+			/* Not straight after another: it waits (still buffered) until the
+			 * soul has its feet. */
+			if (p->dodge_wait <= 0) {
+				try_dodge(p->buffer_dir >= 0 ? p->buffer_dir : (p->facing + 2) & 3);
+				p->buffered = BUF_NONE;
+			}
 		} else if (p->buffered == BUF_ATTACK) {
 			/* Square starts the charge; let go at once and it's a plain swing. */
 			if (p->stamina > 0) { p->state = P_CHARGE; p->t = 0; }
