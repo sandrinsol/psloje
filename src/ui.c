@@ -9,6 +9,8 @@
 #include <psxpad.h>
 #include "ui.h"
 #include "font.h"
+#include "game.h"
+#include "save.h"
 #include "draw.h"
 
 extern const uint32_t font_small_tim[], font_large_tim[], logo_tim[];
@@ -253,14 +255,36 @@ typedef struct {
 
 static int menu = MENU_NONE, back_to = MENU_NONE, sel, waiting_key, menu_t;
 
-static const Item TITLE_ITEMS[] = { { "NEW TRIAL", 0 }, { "OPTIONS", 0 }, { "CREDITS", 0 } };
+static const Item TITLE_ITEMS[] = { { "NEW TRIAL", 0 }, { "TRIALS", 0 }, { "OPTIONS", 0 }, { "CREDITS", 0 } };
+
+const char *const TRIAL_NAMES[NUM_TRIALS] = {
+	"BREAK, THEN STRIKE", "IN ITS SLEEP", "SILENCE THE BELL", "ABOVE IT ALL", "FINISHED",
+	"UNBROKEN", "WITHOUT A DROP", "SWIFT JUDGEMENT", "UNTOUCHED",
+};
+const char *const TRIAL_TEXTS[NUM_TRIALS] = {
+	"Riposte a broken husk.",
+	"Destroy a sleeper before it wakes.",
+	"Destroy a bell-ringer before it tolls.",
+	"Jump over ten blows in one trial.",
+	"Destroy the Unfinished.",
+	"Destroy it without dying.",
+	"Destroy it without drinking a flask.",
+	"Destroy it within five minutes.",
+	"Destroy it without being hit once.",
+};
+
+void time_text(char *out, int frames) {
+	int s = frames / 60;
+	sprintf(out, "%d:%02d", s / 60, s % 60);
+}
 static const Item PAUSE_ITEMS[] = { { "RESUME", 0 }, { "OPTIONS", 0 }, { "RETURN TO TITLE", 0 } };
 static const Item OPTION_ITEMS[] = { { "MUSIC", 1 }, { "SOUND", 1 }, { "GAME SPEED", 2 }, { "CONTROLS", 0 }, { "BACK", 0 } };
 static const char *ACTION_NAMES[NUM_ACTIONS] = { "ATTACK", "DODGE", "JUMP", "FLASK", "SKILL I", "SKILL II" };
 
 static int count(void) {
 	switch (menu) {
-	case MENU_TITLE: return 3;
+	case MENU_TITLE: return 4;
+	case MENU_TRIALS: return NUM_TRIALS;
 	case MENU_PAUSE: return 3;
 	case MENU_OPTIONS: return 5;
 	case MENU_CONTROLS: return NUM_ACTIONS + 2;   /* + DEFAULTS, BACK */
@@ -323,8 +347,9 @@ int menu_update(uint16_t held, uint16_t pressed) {
 	switch (menu) {
 	case MENU_TITLE:
 		if (ok && sel == 0) { menu = MENU_NONE; return UI_NEW_GAME; }
-		if (ok && sel == 1) menu_open(MENU_OPTIONS);
-		if (ok && sel == 2) menu_open(MENU_CREDITS);
+		if (ok && sel == 1) menu_open(MENU_TRIALS);
+		if (ok && sel == 2) menu_open(MENU_OPTIONS);
+		if (ok && sel == 3) menu_open(MENU_CREDITS);
 		break;
 	case MENU_PAUSE:
 		if ((ok && sel == 0) || back || (pressed & PAD_START && !ok)) { menu = MENU_NONE; return UI_RESUME; }
@@ -336,7 +361,7 @@ int menu_update(uint16_t held, uint16_t pressed) {
 		if (sel == 1 && lr) settings.sound = settings.sound + lr > 10 ? 10 : settings.sound + lr < 0 ? 0 : settings.sound + lr;
 		if (sel == 2 && (lr || ok)) settings.slow ^= 1;
 		if (ok && sel == 3) menu_open(MENU_CONTROLS);
-		if ((ok && sel == 4) || back) { menu = back_to; sel = 1; }
+		if ((ok && sel == 4) || back) { menu = back_to; sel = back_to == MENU_TITLE ? 2 : 1; }
 		break;
 	case MENU_CONTROLS:
 		if (ok && sel < NUM_ACTIONS) waiting_key = 1;
@@ -344,7 +369,10 @@ int menu_update(uint16_t held, uint16_t pressed) {
 		if ((ok && sel == NUM_ACTIONS + 1) || back) { menu = MENU_OPTIONS; sel = 3; }
 		break;
 	case MENU_CREDITS:
-		if (ok || back) { menu = back_to; sel = 2; }
+		if (ok || back) { menu = back_to; sel = 3; }
+		break;
+	case MENU_TRIALS:
+		if (ok || back) { menu = back_to; sel = 1; }
 		break;
 	}
 	return UI_NOTHING;
@@ -378,6 +406,29 @@ void menu_draw(int frame) {
 			int head = i == 0 || (C[i][0] && i + 1 < n && C[i + 1][0] && (i == 2 || i == 5 || i == 9));
 			text(cx, y0 + i * lh - lh / 2, C[i], F, head ? 220 : 160, head ? 190 : 150, head ? 130 : 140, 1, 1);
 		}
+		return;
+	}
+
+	if (menu == MENU_TRIALS) {
+		/* The trials: met ones lit, the chosen one's demand below, and the
+		 * record so far. */
+		int y0 = hi ? 96 : 40, rh = hi ? 30 : 14, pw2 = hi ? 560 : 290;
+		text(cx, y0 - (hi ? 64 : 30), "TRIALS", FONT_LARGE, 210, 196, 170, 1, 1);
+		panel(cx - pw2 / 2, y0 - rh / 2, pw2, NUM_TRIALS * rh + rh, 3);
+		for (int i = 0; i < NUM_TRIALS; i++) {
+			int met = (record.trials >> i) & 1, on = i == sel, y = y0 + i * rh;
+			int r = met ? 230 : 110, g = met ? 200 : 104, b = met ? 130 : 100;
+			if (on) { r += 20; g += 20; b += 10; }
+			text(cx - pw2 / 2 + (hi ? 44 : 22), y, TRIAL_NAMES[i], hi ? FONT_LARGE : FONT_SMALL, r > 255 ? 255 : r, g, b, 0, 1);
+			if (met) tile(cx - pw2 / 2 + (hi ? 18 : 9), y + (hi ? 10 : 5), hi ? 10 : 5, hi ? 10 : 5, 240, 170, 70, 1);
+			if (on) tile(cx - pw2 / 2 + (hi ? 8 : 4), y + (hi ? 12 : 6), hi ? 4 : 2, hi ? 4 : 2, 230, 190, 120, 1);
+		}
+		int yb = y0 + NUM_TRIALS * rh + (hi ? 24 : 10);
+		text(cx, yb, TRIAL_TEXTS[sel], hi ? FONT_LARGE : FONT_SMALL, 180, 170, 156, 1, 1);
+		char best[16] = "--:--";
+		if (record.best_time) time_text(best, record.best_time);
+		sprintf(line, "BEST %s   DESTROYED %d   DEATHS %d", best, record.bosses, (int)record.deaths);
+		text(cx, yb + (hi ? 40 : 18), line, FONT_SMALL, 140, 132, 124, 1, 1);
 		return;
 	}
 
@@ -527,7 +578,17 @@ int memory_draw(int t, int guilt) {
 		y += 24;
 	}
 	int done = left > 30;
-	if (done && (t & 32)) text(w / 2, 440, "PRESS CROSS", FONT_SMALL, 140, 132, 124, 1, 1);
+	if (done) {
+		/* How the floor went. */
+		char line[64], tm[16], best[16];
+		time_text(tm, stats.frames);
+		time_text(best, record.best_time);
+		sprintf(line, "TIME %s   DEATHS %d   RIPOSTES %d   FLASKS %d", tm, (int)stats.deaths, (int)stats.ripostes, (int)stats.flasks);
+		text(w / 2, 400, line, FONT_SMALL, 170, 160, 146, 1, 1);
+		sprintf(line, record.best_time == (uint32_t)stats.frames ? "A NEW BEST: %s" : "BEST %s", best);
+		text(w / 2, 420, line, FONT_SMALL, 150, 140, 128, 1, 1);
+		if (t & 32) text(w / 2, 448, "PRESS CROSS", FONT_SMALL, 140, 132, 124, 1, 1);
+	}
 	gradient(0, 0, w, SH(), 16, 14, 18, 4, 4, 6, 8);
 	return done;
 }

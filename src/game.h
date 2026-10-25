@@ -86,7 +86,7 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS };   /* EV_BOSS: the boss's name is carved */
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL };   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
 typedef struct {
 	int16_t type, x, y;   /* tile */
 } GameEvent;
@@ -97,6 +97,22 @@ extern int32_t num_events;
 /* Floor states. */
 enum { F_WAVE_INTRO, F_FIGHT, F_CLEARED, F_DEAD, F_BOSS_INTRO };
 extern int32_t boss;   /* the boss's enemy slot, -1: none (yet) */
+
+/* This trial's numbers (from NEW TRIAL; dying doesn't reset them). */
+typedef struct {
+	int32_t frames;     /* time on the floor, not counting the death screen */
+	int32_t deaths, kills, ripostes, jumped, hurt, flasks;
+} Stats;
+extern Stats stats;
+
+/* Trials: feats, met once and kept (on the memory card). */
+enum {
+	TRIAL_RIPOSTE, TRIAL_SLEEP, TRIAL_BELL, TRIAL_AIR, TRIAL_BOSS,
+	TRIAL_UNBROKEN, TRIAL_DRY, TRIAL_SWIFT, TRIAL_UNTOUCHED, NUM_TRIALS
+};
+#define TRIAL_AIR_COUNT  10            /* blows jumped over in one trial */
+#define TRIAL_SWIFT_TIME (5 * 60 * 60) /* frames */
+extern uint32_t trials;   /* bits met so far (set from the save) */
 
 void game_start_floor(int keep_drop);
 void game_update(const Input *in);

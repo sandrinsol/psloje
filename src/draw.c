@@ -66,6 +66,7 @@ static int flash;             /* lightning, 0..255 */
 static int soul_glow = 256;   /* the soul's light; goes out when it falls */
 static int desat, dim = 256;  /* colour grading: grey, darker (death) */
 static int death_t = -1;
+static int banner_t, banner_id;   /* a trial met: its name, for a while */
 
 /* PSn00bSDK's LoadImage() sends 16 or more words in whole blocks of 16,
  * rounding up: the extra words reach the GPU as commands and garble VRAM.
@@ -1107,6 +1108,13 @@ static void draw_hud(int frame) {
 			text(160 - text_width(NAME, FONT_LARGE) / 2, 170, shown, FONT_LARGE, fade, fade * 3 / 4, fade / 2, 0, 0);
 		}
 	}
+	if (banner_t > 0) {
+		banner_t--;
+		int y = banner_t > 185 ? 34 - (banner_t - 185) * 3 : 34;
+		panel(70, y, 180, 34, 1);
+		text(160, y + 3, "TRIAL MET", FONT_SMALL, 200, 170, 90, 1, 0);
+		text(160, y + 17, TRIAL_NAMES[banner_id], FONT_SMALL, 230, 215, 190, 1, 0);
+	}
 	if (boss >= 0 && floor_state == F_FIGHT) {
 		const Enemy *b = &enemies[boss];
 		panel(30, 206, 260, 28, 1);
@@ -1280,6 +1288,10 @@ static void handle_events(void) {
 			break;
 		case EV_DEATH:
 			burst(e->x, e->y, 30, 170, 180, 220, 6, 90);
+			break;
+		case EV_TRIAL:
+			banner_t = 200;
+			banner_id = e->x;
 			break;
 		case EV_BOSS:
 			burst(e->x, e->y, 30, 255, 140, 60, 12, 300);

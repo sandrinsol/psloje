@@ -36,6 +36,13 @@ two halves (a ring then a wider ring; every other row, then the rest
 "tomorrow"; a rope lashed out to the edge), faster below half its life.
 Then Memory I, written out over a picture of the bell tower in the rain.
 The story (docs/story.md) opens with a few lines before the first floor.
+Nine trials to meet (riposte a broken husk, destroy a sleeper in its sleep,
+silence a bell-ringer before it tolls, jump ten blows, and destroying the
+Unfinished without dying, without a flask, within five minutes, untouched),
+announced as they're met and listed under TRIALS on the title screen; the
+memory screen shows the time, deaths, ripostes and flasks, and the best
+time. Everything is kept on the memory card in slot 1 (one block, with its
+own icon): settings, trials, best time, totals.
 60 fps. No skills or later floors yet.
 
 ## Controls
@@ -92,6 +99,8 @@ effects, synthesised and encoded as SPU ADPCM).
   swings, drink, death; the husk's lumber, windup, slam, broken reel),
   eased between keys and blended from one to the next.
 - `src/audio.c`: sound effects on SPU voices, from game events.
+- `src/save.c`: the memory card, spoken to directly a frame at a time
+  (the directory, one save block with its title and icon).
 - `src/music.c`: the sequencer (one SPU voice a track, one tick a frame),
   fades, the hall reverb, the voices (whisper, sigh, choir swell).
 - `src/ui.c`: lettering, carved panels, fades, the title screen and the
@@ -100,4 +109,5 @@ effects, synthesised and encoded as SPU ADPCM).
   60 fps loop and pad input.
 - `tests/ps1/*.json`: ps1-test scripts (moving and facing, death and the
   drop, jumping a slam, the heavy blow, cancels and the analog stick, the
-  sleeper and the bell-ringer, the boss and its memory), run on every push.
+  sleeper and the bell-ringer, the boss and its memory, the save surviving a
+  reset), run on every push.

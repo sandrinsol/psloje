@@ -82,6 +82,18 @@ husk; any hit on a broken husk is a riposte, 3x damage.
 - The boss: the Unfinished (400 hp), after wave III; dying restarts the
   floor from wave I. Its memory, then back to the title (no floor 2 yet).
 
+## Saves, trials, stats
+- Memory card slot 1, one block ("GRID SOULS", a bell icon): settings,
+  trials met, best time, runs, deaths, bosses destroyed. Read at start-up;
+  written when the options are left, when the soul dies, after the boss and
+  when returning to the title.
+- Trials (achievements): riposte a broken husk; destroy a sleeper in its
+  sleep; a bell-ringer before it tolls; jump over ten blows in one trial;
+  destroy the Unfinished; without dying; without a flask; within five
+  minutes; without being hit.
+- Stats on the memory screen: time on the floor, deaths, ripostes, flasks;
+  the best time.
+
 ## Milestones
 1. Floor 1 prototype: 9 x 9 grid, dodge-movement, turning, sword, block and
    parry, stamina, flasks, Sloth husks with telegraphs, three waves, death and

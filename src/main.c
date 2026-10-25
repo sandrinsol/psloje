@@ -23,6 +23,7 @@
 #include "draw.h"
 #include "audio.h"
 #include "music.h"
+#include "save.h"
 #include "ui.h"
 
 #define PRIM_LEN (96 * 1024)
@@ -87,6 +88,9 @@ static void init(void) {
 	InitPAD(pad_buffers[0], 34, pad_buffers[1], 34);
 	StartPAD();
 	ChangeClearPAD(0);
+	/* The save, before anything takes input (one is made if there isn't). */
+	if (!save_load()) save_write();
+	trials = record.trials;
 
 	/* Root counter 1 counts scanlines: how far into the frame we are. */
 	TIMER_CTRL(1) = 0x0100;
@@ -121,6 +125,12 @@ static int pending = UI_NOTHING;   /* waiting for a fade-out to finish */
 static int paused;
 static int story_t;        /* frames on the opening or memory screen */
 static int memory_done;    /* the memory is all written out */
+
+/* To the card, with any trials met since. */
+static void save_now(void) {
+	record.trials |= trials;
+	save_write();
+}
 /* Screen changes of our own, alongside the menus' UI_* ones. */
 enum { GO_GAME = 100, GO_MEMORY, GO_TITLE };
 
@@ -157,6 +167,8 @@ static void go_game(void) {
 	game_start_floor(0);
 	fade_to(0, 4);
 	music_play(SONG_SLOTH, 90);
+	record.runs++;
+	trials = record.trials;
 }
 
 static void update(uint16_t now, uint16_t pressed) {
@@ -186,6 +198,13 @@ static void update(uint16_t now, uint16_t pressed) {
 		}
 		return;
 	}
+	/* Leaving the options: keep them. */
+	{
+		static int last_menu;
+		int m = menu_current();
+		if ((last_menu == MENU_OPTIONS || last_menu == MENU_CONTROLS) && m != MENU_OPTIONS && m != MENU_CONTROLS) save_now();
+		last_menu = m;
+	}
 	if (screen == SCREEN_TITLE) {
 		if (!title_ready) {
 			if (pressed & (PAD_START | PAD_CROSS)) {
@@ -202,11 +221,14 @@ static void update(uint16_t now, uint16_t pressed) {
 	if (paused) {
 		int r = menu_update(now, pressed);
 		if (r == UI_RESUME) { paused = 0; music_level(256, 20); }
-		if (r == UI_QUIT_TO_TITLE) { paused = 0; pending = r; fade_to(255, 8); music_level(0, 30); }
+		if (r == UI_QUIT_TO_TITLE) { paused = 0; pending = r; fade_to(255, 8); music_level(0, 30); save_now(); }
 		return;
 	}
 	/* The boss fallen and the floor silent: on to its memory. */
 	if (floor_state == F_CLEARED && boss >= 0 && floor_t > 240) {
+		record.bosses++;
+		if (!record.best_time || (uint32_t)stats.frames < record.best_time) record.best_time = stats.frames;
+		save_now();
 		pending = GO_MEMORY;
 		fade_to(255, 3);
 		music_level(0, 80);
@@ -230,7 +252,12 @@ static void update(uint16_t now, uint16_t pressed) {
 	game_update(&in);
 	ticked = 1;
 	for (int i = 0; i < num_events; i++) {
-		if (game_events[i].type == EV_DEATH) { slow_t = 90; music_level(0, 150); }   /* the music dies away */
+		if (game_events[i].type == EV_DEATH) {
+			slow_t = 90;
+			music_level(0, 150);   /* the music dies away */
+			record.deaths++;
+			save_now();
+		}
 		if (game_events[i].type == EV_RISE) music_play(SONG_SLOTH, 120);
 		if (game_events[i].type == EV_BOSS) music_play(SONG_BOSS, 20);   /* its name carved: its theme */
 	}
