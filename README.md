@@ -24,7 +24,9 @@ hit the ground, strike, or hold to charge a heavy blow that breaks a husk,
 then riposte it for triple damage; drink flasks, die, rise again and fetch
 the absolution you dropped. Hit-stop, camera kicks, ash bursts and
 synthesised sound effects. When the floor is won its outer ring breaks away.
-60 fps. No boss, music or skills yet.
+Music synthesised for the SPU (a choir, a drone, bells, a heartbeat; a
+title theme and Sloth's floor), whispers and sighs, everything in the SPU's
+hall reverb. 60 fps. No boss or skills yet.
 
 ## Controls
 
@@ -59,7 +61,7 @@ Generated assets (committed; rerun after changing them):
 `node tools/makeglyphs.mjs` (HUD glyphs), `python3 tools/makefont.py`
 (lettering and the logo, from Liberation Serif, see docs/credits.md), `node tools/makeslabs.mjs` (the
 floor's rune slabs and their glow colours), `node tools/makefigtex.mjs`
-(textures for the figures, clouds, the eye, stone chunks, glows), `node tools/makesfx.mjs` (sound
+(textures for the figures, clouds, the eye, stone chunks, glows), `node tools/makemusic.mjs [preview dir]` (instruments, voices and songs; WAV previews), `node tools/makesfx.mjs` (sound
 effects, synthesised and encoded as SPU ADPCM).
 
 ## Code
@@ -78,6 +80,8 @@ effects, synthesised and encoded as SPU ADPCM).
   swings, drink, death; the husk's lumber, windup, slam, broken reel),
   eased between keys and blended from one to the next.
 - `src/audio.c`: sound effects on SPU voices, from game events.
+- `src/music.c`: the sequencer (one SPU voice a track, one tick a frame),
+  fades, the hall reverb, the voices (whisper, sigh, choir swell).
 - `src/ui.c`: lettering, carved panels, fades, the title screen and the
   menus, settings and button mapping.
 - `src/main.c`: the screens (title at 640 x 480, the fight at 320 x 240),

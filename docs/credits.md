@@ -7,5 +7,6 @@
   The game's bitmap fonts and title logo (`assets/font_*.tim`,
   `assets/logo.tim`, made by `tools/makefont.py`) are derived from it and
   carry the same licence.
-- Everything else (models, textures, glyphs, sounds) is made in code in this
-  repository.
+- Everything else (models, textures, glyphs, sounds, music) is made in code
+  in this repository. The reverb uses the SPU's "Hall" settings as listed in
+  psx-spx (Martin Korth's Nocash PSX specifications).
