@@ -60,7 +60,7 @@ void letterbox(int amount);
 
 /* ---- Screens and menus ------------------------------------------------------------------ */
 
-enum { MENU_NONE, MENU_TITLE, MENU_PAUSE, MENU_OPTIONS, MENU_CONTROLS, MENU_CREDITS };
+enum { MENU_NONE, MENU_TITLE, MENU_PAUSE, MENU_OPTIONS, MENU_CONTROLS, MENU_CREDITS, MENU_TRIALS };
 /* What a menu asks the main loop to do. */
 enum { UI_NOTHING, UI_NEW_GAME, UI_RESUME, UI_QUIT_TO_TITLE };
 
@@ -76,3 +76,8 @@ void title_draw(int frame, int show_logo);
  * t: frames since shown. Return 1 once all of it is written. */
 int opening_draw(int t);
 int memory_draw(int t, int guilt);
+
+/* The trials' names and what they ask (TRIAL_* in game.h). */
+extern const char *const TRIAL_NAMES[], *const TRIAL_TEXTS[];
+/* "M:SS" for a number of frames. */
+void time_text(char *out, int frames);

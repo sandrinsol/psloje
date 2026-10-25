@@ -74,6 +74,16 @@ GameEvent game_events[MAX_EVENTS];
 int32_t num_events;
 int32_t floor_t;   /* frames in the floor's current state */
 int32_t boss = -1;
+Stats stats;
+uint32_t trials;
+
+/* A trial met for the first time: kept, and announced. */
+static void emit(int type, int x, int y);
+static void trial(int id) {
+	if (trials & (1u << id)) return;
+	trials |= 1u << id;
+	emit(EV_TRIAL, id, 0);
+}
 
 static uint16_t held_pressed;   /* buttons pressed during a hit-stop */
 
@@ -128,6 +138,7 @@ static const int8_t WAVES[NUM_WAVES][3][3] = {
 
 void game_start_floor(int keep_drop) {
 	grid_n = 9;
+	if (!keep_drop) memset(&stats, 0, sizeof(stats));   /* a new trial */
 	memset(&player, 0, sizeof(player));
 	player.x = player.from_x = 4;
 	player.y = player.from_y = 8;
@@ -199,6 +210,7 @@ static void player_tile(int *x, int *y) {
 }
 
 static void die(void) {
+	stats.deaths++;
 	player.state = P_DEAD;
 	player.t = 0;
 	floor_state = F_DEAD;
@@ -214,11 +226,15 @@ static void player_hit(int ex, int ey, int damage) {
 		return;
 	if (player.state == P_DODGE && player.t >= IFRAME_FIRST && player.t <= IFRAME_LAST)
 		return;   /* rolled through it */
-	if (player.state == P_JUMP && player.t >= AIR_FIRST && player.t <= AIR_LAST)
+	if (player.state == P_JUMP && player.t >= AIR_FIRST && player.t <= AIR_LAST) {
+		stats.jumped++;
+		if (stats.jumped >= TRIAL_AIR_COUNT) trial(TRIAL_AIR);
 		return;   /* jumped over it */
+	}
 	int px, py;
 	player_tile(&px, &py);
 	player.hp -= damage;
+	stats.hurt += damage;
 	player.hurt_t = 0;
 	shake_t = 10;
 	hitstop(5);
@@ -327,12 +343,23 @@ static void sword_hits(void) {
 	shake_t = riposte ? 12 : heavy ? 8 : 3;
 	hitstop(riposte ? 12 : heavy ? 9 : 4);
 	emit(riposte ? EV_RIPOSTE : heavy ? EV_HEAVY : EV_HIT, tx, ty);
+	if (riposte) { stats.ripostes++; trial(TRIAL_RIPOSTE); }
 	if (e->hp <= 0) {
 		e->state = E_DYING;
 		e->t = 0;
 		absolution += e->kind == K_UNFINISHED ? BOSS_REWARD : HUSK_REWARD;
 		enemies_alive--;
 		emit(EV_KILL, tx, ty);
+		stats.kills++;
+		if (e->kind == K_SLEEPER && asleep) trial(TRIAL_SLEEP);
+		if (e->kind == K_BELL && e->attack != ATK_RING) trial(TRIAL_BELL);   /* before it ever tolled */
+		if (e->kind == K_UNFINISHED) {
+			trial(TRIAL_BOSS);
+			if (!stats.deaths) trial(TRIAL_UNBROKEN);
+			if (!stats.flasks) trial(TRIAL_DRY);
+			if (stats.frames <= TRIAL_SWIFT_TIME) trial(TRIAL_SWIFT);
+			if (!stats.hurt) trial(TRIAL_UNTOUCHED);
+		}
 	} else if (asleep) {
 		e->state = E_WAKE;      /* a rude awakening */
 		e->t = 0;
@@ -435,6 +462,7 @@ static void update_player(const Input *in) {
 			p->buffered = BUF_NONE;
 		} else if ((in->pressed & PAD_TRIANGLE) && p->flasks > 0) {
 			p->flasks--;
+			stats.flasks++;
 			p->state = P_DRINK;
 			p->t = 0;
 		} else if (held_dir >= 0) {
@@ -679,6 +707,7 @@ void game_update(const Input *in) {
 	held_pressed = 0;
 	in = &now;
 	game_frames++;
+	if (floor_state != F_DEAD && floor_state != F_CLEARED) stats.frames++;
 	floor_t++;
 	if (message_t > 0) message_t--;
 	if (shake_t > 0) shake_t--;
