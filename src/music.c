@@ -143,6 +143,10 @@ void music_update(void) {
 	}
 }
 
+void music_note(int slot, int inst, int note, int vol, int pan) {
+	key_on(FIRST_VOICE + (slot & (MAX_TRACKS - 1)), inst, note, vol * settings.music / 10, pan);
+}
+
 void music_voice(int inst, int note, int vol, int pan) {
 	/* Two of the sound-effect voices, so a voice doesn't cut a hit short. */
 	int v = 6 + next_fx_voice;

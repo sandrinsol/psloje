@@ -74,6 +74,12 @@ void menu_draw(int frame);
 /* The title screen's backdrop (sky, ash, logo). */
 void title_draw(int frame, int show_logo);
 
+/* The studio's mark before the title (640 x 480): a sun rising over the
+ * sea, then "SaraSol Games". t: frames since shown. */
+void splash_draw(int t);
+#define SPLASH_FRAMES 300
+#define SPLASH_CHIME  112   /* the sun clears the horizon: its chord */
+
 /* The story (640 x 480): the opening lines, and a memory after its boss.
  * t: frames since shown. Return 1 once all of it is written. */
 int opening_draw(int t);

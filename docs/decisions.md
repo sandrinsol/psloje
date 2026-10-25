@@ -22,6 +22,13 @@ What was decided on top of the [design brief](design-brief.md).
   health at the bottom during boss fights.
 - English.
 
+## Studio
+- The game is built by SaraSol Games. At power-on, before the title, their
+  own mark: a sun rising over the sea, a swell and three bells as it clears
+  the horizon, then "SaraSol" and "GAMES" (about 5 s; Start or Cross skips).
+  Original: none of the console's own start-up screens or sounds, which
+  belong to its maker and come from the console's BIOS anyway.
+
 ## Controls
 | Button | Action |
 |---|---|

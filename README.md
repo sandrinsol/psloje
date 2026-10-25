@@ -5,7 +5,7 @@ grid that shrinks floor by floor. You are a damned soul fighting through the
 seven sins of an afterlife trial. See [docs/design-brief.md](docs/design-brief.md)
 and [docs/decisions.md](docs/decisions.md).
 
-**Status: Floor 1 prototype, in 3D.** A title screen (the name carved in
+**Status: Floor 1 prototype, in 3D.** By SaraSol Games: their mark at power-on (a sun rising over the sea, a bell chord), then a title screen (the name carved in
 stone, 640 x 480), menus (pause, options with volume, a slower game speed
 as an assist, button remapping, credits), a carved
 stone HUD in the game's own serif lettering, fades and a slow zoom onto the
