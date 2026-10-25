@@ -38,7 +38,7 @@ typedef struct {
 static Buffer buffers[2];
 static int active;
 
-enum { SCREEN_TITLE, SCREEN_GAME, SCREEN_OPENING, SCREEN_MEMORY };
+enum { SCREEN_TITLE, SCREEN_GAME, SCREEN_OPENING, SCREEN_MEMORY, SCREEN_SPLASH };
 volatile int32_t screen = -1;
 volatile uint32_t frame_count;
 volatile uint32_t boot_magic;   /* 0x51D50001 once main() runs: tests wait for it */
@@ -143,6 +143,15 @@ static void go_title(void) {
 	music_play(SONG_TITLE, 120);
 }
 
+/* At power-on: the studio's mark, then the title. */
+static void go_splash(void) {
+	set_video(1);
+	screen = SCREEN_SPLASH;
+	story_t = 0;
+	fade_to(0, 8);
+	music_play(-1, 0);
+}
+
 /* The opening lines, white on black, before the first floor. */
 static void go_opening(void) {
 	screen = SCREEN_OPENING;
@@ -183,6 +192,23 @@ static void update(uint16_t now, uint16_t pressed) {
 		if (p == GO_GAME) go_game();
 		if (p == GO_MEMORY) go_memory();
 		if (p == UI_QUIT_TO_TITLE || p == GO_TITLE) go_title();
+		return;
+	}
+	if (screen == SCREEN_SPLASH) {
+		story_t++;
+		/* As the sun clears the horizon: a low swell, then bells, one by one. */
+		if (story_t == SPLASH_CHIME) {
+			music_note(0, INST_SWELL, 45, 0x1400, 0);
+			music_note(1, INST_DRONE, 33, 0x0c00, 0);
+		}
+		if (story_t == SPLASH_CHIME) music_note(2, INST_BELL, 57, 0x1800, -20);
+		if (story_t == SPLASH_CHIME + 14) music_note(3, INST_BELL, 64, 0x1400, 20);
+		if (story_t == SPLASH_CHIME + 28) music_note(4, INST_BELL, 69, 0x1200, 0);
+		/* Start or Cross: straight on to the title. */
+		if (story_t >= SPLASH_FRAMES || (story_t > 20 && (pressed & (PAD_START | PAD_CROSS)))) {
+			pending = GO_TITLE;
+			fade_to(255, story_t >= SPLASH_FRAMES ? 5 : 10);
+		}
 		return;
 	}
 	if (screen == SCREEN_OPENING || screen == SCREEN_MEMORY) {
@@ -267,7 +293,7 @@ static void update(uint16_t now, uint16_t pressed) {
 int main(int argc, const char **argv) {
 	boot_magic = 0x51D50001;
 	init();
-	go_title();
+	go_splash();
 
 	int fps_frames = 0, fps_start = VSync(-1);
 	for (;;) {
@@ -294,6 +320,8 @@ int main(int argc, const char **argv) {
 			if (save_state < 0)
 				text(320, 460, "NO MEMORY CARD IN SLOT 1: NOTHING WILL BE SAVED", FONT_SMALL, 150, 110, 100, 1, 1);
 			title_draw(frame_count, menu_current() == MENU_TITLE || !title_ready);
+		} else if (screen == SCREEN_SPLASH) {
+			splash_draw(story_t);
 		} else if (screen == SCREEN_OPENING) {
 			opening_draw(story_t);
 		} else if (screen == SCREEN_MEMORY) {

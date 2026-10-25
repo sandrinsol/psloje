@@ -396,17 +396,17 @@ void menu_draw(int frame) {
 
 	if (menu == MENU_CREDITS) {
 		static const char *C[] = {
-			"GRID SOULS", "",
+			"GRID SOULS", "A SARASOL GAMES PRODUCTION", "",
 			"DESIGN", "SANDRINSOL", "",
 			"MADE WITH", "CLAUDE CODE",
 			"PSN00BSDK", "", "LETTERING", "LIBERATION SERIF (SIL OFL)", "",
 			"THANK YOU FOR PLAYING",
 		};
-		lh = lh * 3 / 4;   /* thirteen lines: all on the screen */
+		lh = lh * 3 / 4;   /* fourteen lines: all on the screen */
 		int n = sizeof(C) / sizeof(C[0]), y0 = SH() / 2 - n * lh / 2 + lh / 2;
 		panel(cx - (hi ? 260 : 130), y0 - lh, hi ? 520 : 260, n * lh + lh / 2, 3);
 		for (int i = 0; i < n; i++) {
-			int head = i == 0 || (C[i][0] && i + 1 < n && C[i + 1][0] && (i == 2 || i == 5 || i == 9));
+			int head = i == 0 || (C[i][0] && i + 1 < n && C[i + 1][0] && (i == 3 || i == 6 || i == 10));
 			text(cx, y0 + i * lh - lh / 2, C[i], F, head ? 220 : 160, head ? 190 : 150, head ? 130 : 140, 1, 1);
 		}
 		return;
@@ -485,6 +485,134 @@ void menu_draw(int frame) {
 		text(cx, SH() - (hi ? 58 : 24), "CROSS: CHOOSE", hi ? FONT_LARGE : FONT_SMALL, 110, 104, 98, 1, 1);
 	/* The pause menu darkens the fight behind it. */
 	if (menu != MENU_TITLE && !hi) dark_box(0, 0, SW(), SH(), 110, 6);
+}
+
+/* ---- The studio's mark ------------------------------------------------------------------- */
+
+static int ease(int k) {   /* smoothstep, 0..256 */
+	if (k <= 0) return 0;
+	if (k >= 256) return 256;
+	return k * k * (768 - 2 * k) >> 16;
+}
+
+/* One letter, scaled (x 1/256): the studio's name, larger than the fonts. */
+static int big_letter(int x, int y, char c, int scale, int r, int g, int b, int layer) {
+	int i = (uint8_t)c - 32;
+	if (i < 0 || i >= 95) i = 0;
+	int w = font_large[i][2] * scale >> 8;
+	if (i && room(sizeof(POLY_FT4))) {
+		int cw = LARGE_W * scale >> 8, chh = LARGE_H * scale >> 8;
+		POLY_FT4 *q = (POLY_FT4 *)prim;
+		setPolyFT4(q);
+		setXY4(q, x, y, x + cw, y, x, y + chh, x + cw, y + chh);
+		int u = font_large[i][0], v = font_large[i][1];
+		setUV4(q, u, v, u + LARGE_W, v, u, v + LARGE_H, u + LARGE_W, v + LARGE_H);
+		setRGB0(q, r >> 1, g >> 1, b >> 1);
+		q->tpage = font_tpage[FONT_LARGE];
+		q->clut = font_clut;
+		addPrim(ot + layer, q);
+		prim += sizeof(POLY_FT4);
+	}
+	return w;
+}
+
+/* A disc as a fan of shaded triangles, bright in the middle; added light
+ * when glow is set. */
+static void disc(int cx, int cy, int r, int r0, int g0, int b0, int r1, int g1, int b1, int glow, int layer) {
+	for (int i = 0; i < 24; i++) {
+		if (!room(sizeof(POLY_G3))) return;
+		int a0 = i * 4096 / 24, a1 = (i + 1) * 4096 / 24;
+		POLY_G3 *q = (POLY_G3 *)prim;
+		setPolyG3(q);
+		setXY3(q, cx, cy, cx + (icos(a0) * r >> 12), cy + (isin(a0) * r >> 12), cx + (icos(a1) * r >> 12), cy + (isin(a1) * r >> 12));
+		setRGB0(q, r0, g0, b0);
+		setRGB1(q, r1, g1, b1);
+		setRGB2(q, r1, g1, b1);
+		if (glow) setSemiTrans(q, 1);
+		addPrim(ot + layer, q);
+		prim += sizeof(POLY_G3);
+	}
+	if (glow) blend(1, layer);   /* add */
+}
+
+/* A line fading out to both ends. */
+static void hline(int cx, int y, int half, int r, int g, int b, int layer) {
+	for (int side = -1; side <= 1; side += 2) {
+		if (half <= 0 || !room(sizeof(POLY_G4))) return;
+		POLY_G4 *q = (POLY_G4 *)prim;
+		setPolyG4(q);
+		int x1 = cx + side * half;
+		setXY4(q, cx, y, x1, y, cx, y + 2, x1, y + 2);
+		setRGB0(q, r, g, b);
+		setRGB1(q, 0, 0, 0);
+		setRGB2(q, r, g, b);
+		setRGB3(q, 0, 0, 0);
+		addPrim(ot + layer, q);
+		prim += sizeof(POLY_G4);
+	}
+}
+
+void splash_draw(int t) {
+	const int cx = 320, hy = 250;   /* the horizon */
+	char ch[2] = { 0, 0 };
+	/* The horizon drawn out from the middle. */
+	int k = ease((t - 10) * 256 / 60);
+	hline(cx, hy, 300 * k >> 8, 150, 110, 60, 3);
+	/* The sun rises: below the horizon it's hidden by the sea. */
+	int rise = ease((t - 40) * 256 / 100);
+	int sy = hy + 60 - (100 * rise >> 8), rad = 50;
+	int heat = 140 + (115 * rise >> 8);   /* up to 255: a colour byte */
+	disc(cx, sy, rad, heat, heat * 15 / 16, heat * 3 / 4, heat, heat * 9 / 16, heat / 5, 0, 6);
+	disc(cx, sy, rad * 5 / 2, 70 * rise >> 8, 40 * rise >> 8, 12 * rise >> 8, 0, 0, 0, 1, 7);
+	/* Slow rays once it's up. */
+	int rays = ease((t - SPLASH_CHIME) * 256 / 50);
+	for (int i = 0; rays && i < 12; i++) {
+		if (!room(sizeof(POLY_G3))) break;
+		int a = i * 4096 / 12 + t * 3, w = 60;
+		int r0 = rad + 8, r1 = rad + 40 + (i & 1) * 26;
+		POLY_G3 *q = (POLY_G3 *)prim;
+		setPolyG3(q);
+		setXY3(q, cx + (icos(a - w) * r0 >> 12), sy + (isin(a - w) * r0 >> 12),
+		          cx + (icos(a + w) * r0 >> 12), sy + (isin(a + w) * r0 >> 12),
+		          cx + (icos(a) * r1 >> 12), sy + (isin(a) * r1 >> 12));
+		int c = 90 * rays >> 8;
+		setRGB0(q, c, c * 3 / 4, c / 3);
+		setRGB1(q, c, c * 3 / 4, c / 3);
+		setRGB2(q, 0, 0, 0);
+		setSemiTrans(q, 1);
+		addPrim(ot + 8, q);
+		prim += sizeof(POLY_G3);
+	}
+	if (rays) blend(1, 8);
+	/* The sea: black over the sun's lower half, its light broken on the water. */
+	tile(0, hy + 2, 640, 480 - hy - 2, 0, 0, 0, 4);
+	for (int i = 0; i < 6; i++) {
+		int y = hy + 7 + i * 6 + i * i / 2;   /* clear of the name below */
+		int half = ((110 - i * 12) * rise >> 8) + (isin((t * 40 + i * 900) & 4095) * 10 >> 12);
+		int c = (170 - i * 20) * rise >> 8;
+		hline(cx + (isin((t * 25 + i * 1500) & 4095) * 4 >> 12), y, half, c, c * 5 / 8, c / 4, 3);
+	}
+	/* The name, a letter at a time, and the word under it. */
+	static const char NAME[] = "SaraSol", SUB[] = "GAMES";
+	const int big = 512;   /* twice the large font */
+	int nw = 0;
+	for (int i = 0; NAME[i]; i++) nw += font_large[(uint8_t)NAME[i] - 32][2] * big >> 8;
+	int x = cx - nw / 2;
+	for (int i = 0; NAME[i]; i++) {
+		int b = (t - 140 - i * 6) * 12;
+		if (b > 256) b = 256;
+		x += big_letter(x, hy + 52, NAME[i], big, 245 * (b > 0 ? b : 0) >> 8, 205 * (b > 0 ? b : 0) >> 8, 130 * (b > 0 ? b : 0) >> 8, 2);
+	}
+	int sp = 16, sw = 0;
+	for (int i = 0; SUB[i]; i++) { ch[0] = SUB[i]; sw += text_width(ch, FONT_LARGE) + (SUB[i + 1] ? sp : 0); }
+	x = cx - sw / 2;
+	for (int i = 0; SUB[i]; i++) {
+		ch[0] = SUB[i];
+		int b = (t - 196 - i * 4) * 10;
+		if (b > 256) b = 256;
+		if (b > 0) text(x, hy + 120, ch, FONT_LARGE, 175 * b >> 8, 165 * b >> 8, 150 * b >> 8, 0, 2);
+		x += text_width(ch, FONT_LARGE) + sp;
+	}
 }
 
 /* ---- The story's screens ------------------------------------------------------------------------ */

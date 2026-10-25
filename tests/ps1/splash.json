@@ -1,0 +1,15 @@
+{
+  "rom": "build/game.cue",
+  "steps": [
+    {"waitUntil": {"address": "boot_magic", "as": "u32", "op": "eq", "value": 1372913665}, "maxFrames": 3000},
+    {"name": "the studio's mark first", "waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 4}, "maxFrames": 600},
+    {"wait": 240},
+    {"name": "the sun up, the name written", "assert": "goldens/splash.png"},
+    {"name": "Start: on to the title", "tap": "START"},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 0}, "maxFrames": 60},
+    {"name": "and it plays out by itself too", "reset": true},
+    {"waitUntil": {"address": "boot_magic", "as": "u32", "op": "eq", "value": 1372913665}, "maxFrames": 3000},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 4}, "maxFrames": 600},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 0}, "maxFrames": 400}
+  ]
+}
