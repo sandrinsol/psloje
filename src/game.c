@@ -13,8 +13,8 @@
 #define ATTACK_FRAMES   22
 #define ATTACK_COST     (12 * 16)
 #define ATTACK_DAMAGE   20
-#define HEAVY_WINDUP    6      /* charged: hits on frame 6 of the swing */
-#define HEAVY_FRAMES    30
+#define HEAVY_WINDUP    8      /* charged: hits on frame 8 of the swing (a weightier release) */
+#define HEAVY_FRAMES    32
 #define HEAVY_COST      (30 * 16)
 #define HEAVY_DAMAGE    50     /* and it breaks the husk (staggers it) */
 #define RIPOSTE_FACTOR  3      /* any hit on a broken husk */
@@ -26,6 +26,11 @@
 #define FLASK_HEAL      40
 #define FLASKS          3
 #define BUFFER_FRAMES   12     /* a press while busy is kept this long */
+#define PERFECT_FRAMES  6      /* a dodge this late before a blow lands: perfect */
+#define PERFECT_STAMINA (30 * 16)
+#define WAVE_HEAL       25     /* health back as a wave falls */
+#define CRUMBLE_FRAMES  110    /* the edge cracks this long before it falls */
+#define BREATHER        220    /* between waves: the edge falls, then the next rise */
 #define LIGHT_CANCEL    (ATTACK_WINDUP + 6)   /* a swing's recovery can be cut by a dodge or jump from here */
 #define HEAVY_CANCEL    (HEAVY_WINDUP + 12)
 
@@ -56,9 +61,14 @@
 #define BOSS_REWARD     200
 #define BRIGHT_FRAMES   15     /* the last frames of a windup: bright */
 
-enum { ATK_SLAM, ATK_LINE, ATK_CROSS, ATK_RING, ATK_UNDONE, ATK_UNDONE2, ATK_TOMORROW, ATK_TOMORROW2, ATK_ROPE };
+enum { ATK_SLAM, ATK_LINE, ATK_CROSS, ATK_RING, ATK_UNDONE, ATK_UNDONE2, ATK_TOMORROW, ATK_TOMORROW2, ATK_ROPE,
+       ATK_UNRAVEL, ATK_UNRAVEL2, ATK_LOOSE, ATK_LOOSE2 };
 
 int32_t grid_n = 9;
+int32_t area_x0, area_y0, area_x1 = 8, area_y1 = 8;
+static int16_t slab_t[MAX_N][MAX_N];   /* see game_slab() */
+static int fell;                        /* the last death was a fall */
+static int fall_x, fall_y;              /* the last solid tile before it */
 Player player;
 Enemy enemies[MAX_ENEMIES];
 volatile int32_t wave, enemies_alive, absolution, guilt, floor_state, game_frames;
@@ -110,8 +120,17 @@ static void say(const char *text, int frames) {
 	message_t = frames;
 }
 
+/* On a slab still standing (crumbling ones too, until they fall). */
 static int inside(int x, int y) {
-	return x >= 0 && y >= 0 && x < grid_n && y < grid_n;
+	return x >= area_x0 && y >= area_y0 && x <= area_x1 && y <= area_y1 && slab_t[y][x] <= 0;
+}
+
+int game_fell(void) { return fell; }
+
+int game_slab(int x, int y) {
+	if (x < 0 || y < 0 || x >= MAX_N || y >= MAX_N) return 9999;
+	if (slab_t[y][x] == 0 && !(x >= area_x0 && y >= area_y0 && x <= area_x1 && y <= area_y1)) return 9999;
+	return slab_t[y][x];
 }
 
 static int enemy_at(int x, int y) {
@@ -125,13 +144,53 @@ static int enemy_at(int x, int y) {
 
 /* ---- Floor -------------------------------------------------------------------- */
 
-/* Each wave: up to 3 of { kind, x, y }. */
+/* Each wave: up to 3 of { kind, x, y }, on the floor as it is by then. */
 #define NUM_WAVES 3
 static const int8_t WAVES[NUM_WAVES][3][3] = {
-	{ { K_HUSK, 4, 1 }, { -1 }, { -1 } },
-	{ { K_HUSK, 1, 2 }, { K_SLEEPER, 6, 4 }, { -1 } },
-	{ { K_HUSK, 2, 0 }, { K_HUSK, 6, 0 }, { K_BELL, 0, 4 } },
+	{ { K_HUSK, 4, 1 }, { -1 }, { -1 } },                           /* 9 x 9 */
+	{ { K_HUSK, 1, 2 }, { K_SLEEPER, 6, 4 }, { -1 } },              /* 8 x 8: x 0..7, y 1..8 */
+	{ { K_HUSK, 2, 1 }, { K_HUSK, 6, 1 }, { K_BELL, 1, 4 } },       /* 7 x 7: x 1..7, y 1..7 */
 };
+/* After each wave, the edges that fall (top, right, bottom, left) and the
+ * floor left: the boss's is 6 x 6. */
+static const int8_t SHRINK[NUM_WAVES][4] = {
+	{ 0, 1, 7, 8 },   /* x0, y0, x1, y1: the top row and right column go */
+	{ 1, 1, 7, 7 },   /* the bottom row and left column */
+	{ 1, 2, 6, 7 },   /* the top row and right column again */
+};
+static int next_x0, next_y0, next_x1, next_y1;
+
+/* The edge outside the next area cracks, then falls in turn. */
+static void start_crumble(int w) {
+	next_x0 = SHRINK[w][0]; next_y0 = SHRINK[w][1]; next_x1 = SHRINK[w][2]; next_y1 = SHRINK[w][3];
+	for (int y = area_y0; y <= area_y1; y++)
+		for (int x = area_x0; x <= area_x1; x++)
+			if (x < next_x0 || x > next_x1 || y < next_y0 || y > next_y1)
+				slab_t[y][x] = -(CRUMBLE_FRAMES + (x * 7 + y * 13) % 24);
+	emit(EV_CRUMBLE, 0, 0);
+}
+
+/* Once a frame: crumbling slabs fall; the soul on one falls with it. */
+static void start_fall(int from_x, int from_y, int to_x, int to_y);
+static void player_tile(int *x, int *y);
+static void update_slabs(void) {
+	for (int y = 0; y < MAX_N; y++)
+		for (int x = 0; x < MAX_N; x++) {
+			int16_t *s = &slab_t[y][x];
+			if (*s < 0 && ++*s == 0) {
+				*s = 1;
+				if (shake_t < 4) shake_t = 4;   /* each one, a thud */
+				int px, py;
+				player_tile(&px, &py);
+				if (px == x && py == y && player.state != P_DEAD && player.state != P_FALL && !(player.state == P_JUMP && player.t < AIR_LAST))
+					start_fall(x, y, x, y);
+				if (drop_x == x && drop_y == y) {   /* what it left: onto the floor still standing */
+					drop_x = drop_x < next_x0 ? next_x0 : drop_x > next_x1 ? next_x1 : drop_x;
+					drop_y = drop_y < next_y0 ? next_y0 : drop_y > next_y1 ? next_y1 : drop_y;
+				}
+			} else if (*s > 0 && *s < 999) ++*s;
+		}
+}
 
 void game_start_floor(int keep_drop) {
 	grid_n = 9;
@@ -144,6 +203,11 @@ void game_start_floor(int keep_drop) {
 	player.stamina = STAMINA_MAX * 16;
 	player.flasks = FLASKS;
 	player.hurt_t = 999;
+	player.lock = -1;
+	area_x0 = area_y0 = 0;
+	area_x1 = area_y1 = grid_n - 1;
+	memset(slab_t, 0, sizeof(slab_t));
+	fell = 0;
 	memset(enemies, 0, sizeof(enemies));
 	if (!keep_drop) {
 		drop_x = drop_y = -1;
@@ -165,10 +229,11 @@ static void spawn_wave(void) {
 		Enemy *e = &enemies[n];
 		memset(e, 0, sizeof(*e));
 		e->kind = w[0];
-		e->state = e->kind == K_SLEEPER ? E_SLEEP : E_IDLE;
-		e->t = -n * 25;   /* not all at once */
+		e->state = E_RISE;   /* out of the slabs, then awake (or asleep) */
+		e->t = -n * 25;      /* not all at once */
 		e->x = e->from_x = w[1];
 		e->y = e->from_y = w[2];
+		if (e->x == player.x && e->y == player.y) e->x = e->from_x = e->x + (e->x < (area_x0 + area_x1) / 2 ? 1 : -1);
 		e->hp = e->kind == K_BELL ? BELL_HP : HUSK_HP;
 		e->hit_t = 999;
 		n++;
@@ -183,8 +248,8 @@ static void spawn_boss(void) {
 	e->kind = K_UNFINISHED;
 	e->state = E_SLEEP;   /* still: it doesn't wake by itself */
 	e->x = e->from_x = 4;
-	e->y = e->from_y = 3;
-	if (player.x == 4 && player.y == 3) e->y = e->from_y = 2;
+	e->y = e->from_y = 4;   /* in the middle of what's left (6 x 6) */
+	if (player.x == 4 && player.y == 4) e->x = e->from_x = 3;
 	e->hp = BOSS_HP;
 	e->hit_t = 999;
 	boss = 0;
@@ -216,18 +281,34 @@ static void player_tile(int *x, int *y) {
 
 static void die(void) {
 	stats.deaths++;
+	fell = player.state == P_FALL;
 	player.state = P_DEAD;
 	player.t = 0;
 	floor_state = F_DEAD;
 	floor_t = 0;
 	shake_t = 20;
-	say("JUDGED", 0);
-	emit(EV_DEATH, player.x, player.y);
+	say(fell ? "LOST TO THE VOID" : "JUDGED", 0);
+	emit(EV_DEATH, fell ? fall_x : player.x, fell ? fall_y : player.y);
+}
+
+/* Off the edge (or the slab gone from under it): falling, then gone. The
+ * soul glides from (from) towards (to) and drops. */
+static void start_fall(int from_x, int from_y, int to_x, int to_y) {
+	fall_x = from_x;
+	fall_y = from_y;
+	player.from_x = from_x;
+	player.from_y = from_y;
+	player.x = to_x;
+	player.y = to_y;
+	player.state = P_FALL;
+	player.t = 0;
+	player.buffered = 0;
+	emit(EV_FALL, from_x, from_y);
 }
 
 /* An attack from (ex, ey) lands on the player's tile. */
 static void player_hit(int ex, int ey, int damage) {
-	if (player.state == P_DEAD)
+	if (player.state == P_DEAD || player.state == P_FALL)
 		return;
 	if (player.state == P_DODGE && player.t >= IFRAME_FIRST && player.t <= IFRAME_LAST)
 		return;   /* rolled through it */
@@ -264,17 +345,17 @@ static int dir_of(uint16_t bits) {
 
 void game_player_tile(int *x, int *y) { player_tile(x, y); }
 
-/* Two tiles, over an enemy if need be; one if the second is off the floor
- * or taken. */
+/* Two tiles, over an enemy if need be (one if the second is taken); off
+ * the edge, it lands on nothing and falls. */
 static int try_dodge(int dir) {
 	if (player.stamina <= 0)
 		return 0;
-	int nx = -1, ny = -1;
-	for (int d = DODGE_TILES; d >= 1 && nx < 0; d--) {
+	int nx = -99, ny = -99;
+	for (int d = DODGE_TILES; d >= 1 && nx == -99; d--) {
 		int tx = player.x + DX[dir] * d, ty = player.y + DY[dir] * d;
-		if (inside(tx, ty) && enemy_at(tx, ty) < 0) { nx = tx; ny = ty; }
+		if (enemy_at(tx, ty) < 0) { nx = tx; ny = ty; }
 	}
-	if (nx < 0)
+	if (nx == -99)
 		return 0;
 	player.from_x = player.x;
 	player.from_y = player.y;
@@ -291,7 +372,11 @@ static int try_dodge(int dir) {
 
 static int try_walk(int dir) {
 	int nx = player.x + DX[dir], ny = player.y + DY[dir];
-	if (!inside(nx, ny) || enemy_at(nx, ny) >= 0)
+	if (!inside(nx, ny)) {   /* a step onto nothing */
+		start_fall(player.x, player.y, nx, ny);
+		return 1;
+	}
+	if (enemy_at(nx, ny) >= 0)
 		return 0;
 	player.from_x = player.x;
 	player.from_y = player.y;
@@ -303,12 +388,18 @@ static int try_walk(int dir) {
 	return 1;
 }
 
-/* Face the nearest enemy, along a row or a column; exactly diagonal: as before. */
+static int can_face(int i) {
+	return i >= 0 && i < MAX_ENEMIES && enemies[i].state != E_NONE && enemies[i].state != E_DYING;
+}
+
+/* Face the enemy locked on (R2), else the nearest, along a row or a column;
+ * exactly diagonal: as before. */
 static void face_nearest(void) {
 	int best = 1 << 30, bdx = 0, bdy = 0;
+	if (!can_face(player.lock)) player.lock = -1;
 	for (int i = 0; i < MAX_ENEMIES; i++) {
 		const Enemy *e = &enemies[i];
-		if (e->state == E_NONE || e->state == E_DYING) continue;
+		if (!can_face(i) || (player.lock >= 0 && i != player.lock)) continue;
 		int dx = e->x - player.x, dy = e->y - player.y;
 		int d = dx * dx + dy * dy;
 		if (d < best) { best = d; bdx = dx; bdy = dy; }
@@ -350,11 +441,13 @@ static void sword_hits(void) {
 	if (i < 0)
 		return;
 	Enemy *e = &enemies[i];
+	if (e->state == E_RISE)
+		return;   /* still ash */
 	int heavy = player.heavy, riposte = e->state == E_STAGGER, asleep = e->state == E_SLEEP;
 	e->hp -= (heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE) * (riposte ? RIPOSTE_FACTOR : asleep ? SLEEP_FACTOR : 1);
 	e->hit_t = 0;
-	shake_t = riposte ? 12 : heavy ? 8 : 3;
-	hitstop(riposte ? 12 : heavy ? 9 : 4);
+	shake_t = riposte ? 12 : heavy ? 14 : 3;
+	hitstop(riposte ? 12 : heavy ? 13 : 4);
 	emit(riposte ? EV_RIPOSTE : heavy ? EV_HEAVY : EV_HIT, tx, ty);
 	if (riposte) { stats.ripostes++; trial(TRIAL_RIPOSTE); }
 	if (e->hp <= 0) {
@@ -395,6 +488,24 @@ static void update_player(const Input *in) {
 	if (p->buffer_t > 0 && --p->buffer_t == 0) p->buffered = BUF_NONE;
 	if (p->state == P_DEAD)
 		return;
+	if (p->state == P_FALL) {
+		if (p->t >= FALL_FRAMES) die();
+		return;
+	}
+	/* Nothing under it any more (walking onto a slab as it went, landing a
+	 * jump where one was): it falls. A dodge is checked as it lands. */
+	if (p->state != P_DODGE && !(p->state == P_JUMP && p->t <= AIR_LAST) && !inside(p->x, p->y)) {
+		start_fall(p->from_x, p->from_y, p->x, p->y);
+		return;
+	}
+
+	/* R2: face the next enemy (round to the nearest again). */
+	if (in->pressed & PAD_R2) {
+		int i = p->lock;
+		do i = i + 1 >= MAX_ENEMIES ? -1 : i + 1; while (i >= 0 && !can_face(i));
+		p->lock = i;
+		emit(EV_LOCK, i, 0);
+	}
 
 	/* The D-pad walks (screen directions: Up = away from the camera). */
 	int held_dir = dir_of(in->held);
@@ -416,7 +527,16 @@ static void update_player(const Input *in) {
 
 	switch (p->state) {
 	case P_DODGE:
-		if (p->t >= DODGE_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
+		if (p->t >= DODGE_FRAMES) {
+			if (!inside(p->x, p->y)) {   /* landed on nothing */
+				int fx = p->from_x, fy = p->from_y;
+				start_fall(p->x, p->y, p->x, p->y);
+				fall_x = fx;
+				fall_y = fy;
+				return;
+			}
+			p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y;
+		}
 		break;
 	case P_WALK:
 		if (p->t >= WALK_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
@@ -558,8 +678,23 @@ static void start_attack(Enemy *e, int kind) {
 		e->windup = e->hp < BOSS_HP / 2 ? 32 : 44;
 		break;
 	}
+	case ATK_UNRAVEL:   /* both diagonals out to the edge... */
+	case ATK_UNRAVEL2:  /* ...then its row and column, coming apart */
+		for (int k = 1; k < grid_n; k++)
+			for (int s = 0; s < 4; s++) {
+				int sx = kind == ATK_UNRAVEL ? (s & 1 ? 1 : -1) : DX[s], sy = kind == ATK_UNRAVEL ? (s & 2 ? 1 : -1) : DY[s];
+				mark(e, e->x + sx * k, e->y + sy * k);
+			}
+		e->windup = kind == ATK_UNRAVEL ? 56 : 26;
+		break;
+	case ATK_LOOSE:     /* a loose thread where you stand, and around... */
+	case ATK_LOOSE2:    /* ...and again, wherever you went */
+		mark(e, px, py);
+		for (int s = 0; s < 4; s++) mark(e, px + DX[s], py + DY[s]);
+		e->windup = kind == ATK_LOOSE ? 46 : 34;
+		break;
 	case ATK_RING: { /* the bell: across the whole floor from its edge */
-		int dx = e->x == 0 ? 1 : e->x == grid_n - 1 ? -1 : 0, dy = dx ? 0 : e->y == 0 ? 1 : -1;
+		int dx = e->x == area_x0 ? 1 : e->x == area_x1 ? -1 : 0, dy = dx ? 0 : e->y == area_y0 ? 1 : -1;
 		for (int k = 1; k < grid_n; k++) mark(e, e->x + dx * k, e->y + dy * k);
 		e->windup = BELL_WINDUP;
 		break;
@@ -585,6 +720,10 @@ static void update_enemy(Enemy *e) {
 	int px, py;
 	player_tile(&px, &py);
 	switch (e->state) {
+	case E_RISE:
+		if (e->t == 1) emit(EV_SPAWN, e->x, e->y);
+		if (e->t >= RISE_FRAMES) { e->state = e->kind == K_SLEEPER ? E_SLEEP : E_IDLE; e->t = 0; }
+		break;
 	case E_SLEEP: {
 		if (e->kind == K_UNFINISHED) break;   /* waits for its entrance to end */
 		int dx = px - e->x, dy = py - e->y;
@@ -608,8 +747,11 @@ static void update_enemy(Enemy *e) {
 			if (e->t < (e->hp < BOSS_HP / 2 ? BOSS_IDLE_ANGRY : BOSS_IDLE)) break;
 			int dx = px - e->x, dy = py - e->y, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
 			int cheb = adx > ady ? adx : ady;
-			if (cheb <= 2) start_attack(e, ATK_UNDONE);
+			int r = rnd(6);
+			if (cheb <= 2 && r < 3) start_attack(e, ATK_UNDONE);
+			else if (cheb <= 2 && r < 5) start_attack(e, ATK_UNRAVEL);
 			else if ((dx == 0 || dy == 0) && rnd(5) < 3) start_attack(e, ATK_ROPE);
+			else if (r < 2) start_attack(e, ATK_LOOSE);
 			else if (cheb > 4 && rnd(2)) {
 				/* Drag itself a tile closer. */
 				int nx = e->x + (adx >= ady ? (dx > 0 ? 1 : -1) : 0), ny = e->y + (adx >= ady ? 0 : (dy > 0 ? 1 : -1));
@@ -625,7 +767,7 @@ static void update_enemy(Enemy *e) {
 		if (e->kind == K_BELL) {
 			/* Keeps to its edge: lines up with the soul, then rings. */
 			if (e->t < BELL_IDLE) break;
-			int side = e->x == 0 || e->x == grid_n - 1;   /* on a side edge: rings rows */
+			int side = e->x == area_x0 || e->x == area_x1;   /* on a side edge: rings rows */
 			int want = side ? py : px, at = side ? e->y : e->x;
 			if (want == at) { start_attack(e, ATK_RING); break; }
 			int nx = e->x + (side ? 0 : want > at ? 1 : -1), ny = e->y + (side ? (want > at ? 1 : -1) : 0);
@@ -672,7 +814,14 @@ static void update_enemy(Enemy *e) {
 		if (e->attack == ATK_RING && e->t % 20 == 1) emit(EV_BELL, e->x, e->y);   /* each toll */
 		if (e->t >= e->windup) {
 			player_tile(&px, &py);
-			if (e->target[py * MAX_N + px]) player_hit(e->x, e->y, e->kind == K_UNFINISHED ? BOSS_DAMAGE : HUSK_DAMAGE);
+			/* Dodged at the last moment from where it lands: time slows, breath back. */
+			if (player.state == P_DODGE && player.t <= PERFECT_FRAMES && inside(player.from_x, player.from_y) &&
+			    e->target[player.from_y * MAX_N + player.from_x]) {
+				player.stamina = player.stamina + PERFECT_STAMINA > STAMINA_MAX * 16 ? STAMINA_MAX * 16 : player.stamina + PERFECT_STAMINA;
+				emit(EV_PERFECT, player.from_x, player.from_y);
+			}
+			if (px >= 0 && py >= 0 && px < MAX_N && py < MAX_N && e->target[py * MAX_N + px])
+				player_hit(e->x, e->y, e->kind == K_UNFINISHED ? BOSS_DAMAGE : HUSK_DAMAGE);
 			shake_t = shake_t > 3 ? shake_t : 3;
 			emit(EV_SLAM, e->x, e->y);
 			e->state = E_RECOVER;
@@ -680,6 +829,8 @@ static void update_enemy(Enemy *e) {
 			/* The second half follows at once. */
 			if (e->attack == ATK_UNDONE) start_attack(e, ATK_UNDONE2);
 			else if (e->attack == ATK_TOMORROW) start_attack(e, ATK_TOMORROW2);
+			else if (e->attack == ATK_UNRAVEL) start_attack(e, ATK_UNRAVEL2);
+			else if (e->attack == ATK_LOOSE) start_attack(e, ATK_LOOSE2);
 		}
 		break;
 	case E_RECOVER:
@@ -728,11 +879,26 @@ void game_update(const Input *in) {
 
 	switch (floor_state) {
 	case F_WAVE_INTRO:
-		if (floor_t == 1 && wave > 0) say(wave == 1 ? "WAVE II" : "WAVE III", 90);
-		if (floor_t >= 90) {
-			spawn_wave();
-			floor_state = F_FIGHT;
-			floor_t = 0;
+		if (wave == 0) {
+			if (floor_t >= 90) { spawn_wave(); floor_state = F_FIGHT; floor_t = 0; }
+			break;
+		}
+		/* A breather: a little health back, the edge cracks and falls, then
+		 * the next wave (or the boss) rises. */
+		if (floor_t == 1) {
+			start_crumble(wave - 1);
+			player.hp = player.hp + WAVE_HEAL > HP_MAX ? HP_MAX : player.hp + WAVE_HEAL;
+			emit(EV_HEAL, player.x, player.y);
+			say("THE EDGE CRUMBLES", 100);
+		}
+		if (floor_t == CRUMBLE_FRAMES + 40) {   /* all fallen: the floor as it is now */
+			const int8_t *a = SHRINK[wave - 1 < NUM_WAVES ? wave - 1 : NUM_WAVES - 1];
+			area_x0 = a[0]; area_y0 = a[1]; area_x1 = a[2]; area_y1 = a[3];
+		}
+		if (floor_t == CRUMBLE_FRAMES + 50 && wave < NUM_WAVES) say(wave == 1 ? "WAVE II" : "WAVE III", 90);
+		if (floor_t >= BREATHER) {
+			if (wave < NUM_WAVES) { spawn_wave(); floor_state = F_FIGHT; floor_t = 0; }
+			else spawn_boss();
 		}
 		break;
 	case F_FIGHT:
@@ -742,8 +908,7 @@ void game_update(const Input *in) {
 			if (!dying) {
 				floor_t = 0;
 				if (boss >= 0) { floor_state = F_CLEARED; say("THE FLOOR FALLS SILENT", 0); emit(EV_CLEAR, 0, 0); }
-				else if (++wave < NUM_WAVES) floor_state = F_WAVE_INTRO;
-				else spawn_boss();
+				else { wave++; floor_state = F_WAVE_INTRO; }
 			}
 		}
 		break;
@@ -764,7 +929,7 @@ void game_update(const Input *in) {
 		if (floor_t > 90 && (in->pressed & PAD_CROSS)) {
 			/* Rise again: what you carried stays where you fell; what you
 			 * left last time is gone. */
-			int x = player.x, y = player.y, amount = absolution;
+			int x = fell ? fall_x : player.x, y = fell ? fall_y : player.y, amount = absolution;
 			guilt++;
 			absolution = 0;
 			drop_amount = amount;
@@ -772,10 +937,13 @@ void game_update(const Input *in) {
 			drop_y = amount ? y : -1;
 			game_start_floor(1);
 			emit(EV_RISE, player.x, player.y);
+			static const Input none = { 0, 0 };
+			in = &none;   /* the press that rose isn't a jump too */
 		}
 		break;
 	}
 
+	update_slabs();
 	update_player(in);
 	for (int i = 0; i < MAX_ENEMIES; i++) update_enemy(&enemies[i]);
 }

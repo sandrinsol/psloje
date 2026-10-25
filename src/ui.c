@@ -32,12 +32,11 @@ static const uint16_t DEFAULT_KEYS[NUM_ACTIONS] = { PAD_SQUARE, PAD_CIRCLE, PAD_
 void settings_defaults(void) {
 	settings.music = 7;
 	settings.sound = 8;
-	settings.slow = 0;
 	memcpy(settings.keys, DEFAULT_KEYS, sizeof(DEFAULT_KEYS));
 }
 
 uint16_t settings_map(uint16_t pad) {
-	uint16_t out = pad & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT | PAD_START | PAD_SELECT);
+	uint16_t out = pad & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT | PAD_START | PAD_SELECT | PAD_R2);   /* R2: lock on */
 	for (int a = 0; a < NUM_ACTIONS; a++)
 		if (pad & settings.keys[a]) out |= DEFAULT_KEYS[a];
 	return out;
@@ -278,7 +277,7 @@ void time_text(char *out, int frames) {
 	sprintf(out, "%d:%02d", s / 60, s % 60);
 }
 static const Item PAUSE_ITEMS[] = { { "RESUME", 0 }, { "OPTIONS", 0 }, { "RETURN TO TITLE", 0 } };
-static const Item OPTION_ITEMS[] = { { "MUSIC", 1 }, { "SOUND", 1 }, { "GAME SPEED", 2 }, { "CONTROLS", 0 }, { "BACK", 0 } };
+static const Item OPTION_ITEMS[] = { { "MUSIC", 1 }, { "SOUND", 1 }, { "CONTROLS", 0 }, { "BACK", 0 } };
 static const char *ACTION_NAMES[NUM_ACTIONS] = { "ATTACK", "DODGE", "JUMP", "FLASK", "SKILL I", "SKILL II" };
 
 static int count(void) {
@@ -286,7 +285,7 @@ static int count(void) {
 	case MENU_TITLE: return 4;
 	case MENU_TRIALS: return NUM_TRIALS;
 	case MENU_PAUSE: return 3;
-	case MENU_OPTIONS: return 5;
+	case MENU_OPTIONS: return 4;
 	case MENU_CONTROLS: return NUM_ACTIONS + 2;   /* + DEFAULTS, BACK */
 	case MENU_CREDITS: return 1;
 	}
@@ -361,14 +360,13 @@ int menu_update(uint16_t held, uint16_t pressed) {
 	case MENU_OPTIONS:
 		if (sel == 0 && lr) settings.music = settings.music + lr > 10 ? 10 : settings.music + lr < 0 ? 0 : settings.music + lr;
 		if (sel == 1 && lr) settings.sound = settings.sound + lr > 10 ? 10 : settings.sound + lr < 0 ? 0 : settings.sound + lr;
-		if (sel == 2 && (lr || ok)) settings.slow ^= 1;
-		if (ok && sel == 3) menu_open(MENU_CONTROLS);
-		if ((ok && sel == 4) || back) { menu = back_to; sel = back_to == MENU_TITLE ? 2 : 1; }
+		if (ok && sel == 2) menu_open(MENU_CONTROLS);
+		if ((ok && sel == 3) || back) { menu = back_to; sel = back_to == MENU_TITLE ? 2 : 1; }
 		break;
 	case MENU_CONTROLS:
 		if (ok && sel < NUM_ACTIONS) waiting_key = 1;
 		if (ok && sel == NUM_ACTIONS) memcpy(settings.keys, DEFAULT_KEYS, sizeof(DEFAULT_KEYS));
-		if ((ok && sel == NUM_ACTIONS + 1) || back) { menu = MENU_OPTIONS; sel = 3; }
+		if ((ok && sel == NUM_ACTIONS + 1) || back) { menu = MENU_OPTIONS; sel = 2; }
 		break;
 	case MENU_CREDITS:
 		if (ok || back) { menu = back_to; sel = 3; }
@@ -466,11 +464,6 @@ void menu_draw(int frame) {
 		text(lx, y, label, F, r, g, b, kind ? 0 : 1, 1);
 		int vx = cx + (hi ? 40 : 20);
 		if (kind == 1) slider(vx, y + (hi ? 9 : 4), i == 0 ? settings.music : settings.sound);
-		if (kind == 2) {
-			const char *v = settings.slow ? "SLOW" : "NORMAL";
-			sprintf(line, "< %s >", v);
-			text(vx, y, line, F, r, g, b, 0, 1);
-		}
 		if (kind == 3) {
 			const char *v = on && waiting_key ? ((frame & 16) ? "PRESS A BUTTON" : "") : button_name(settings.keys[i]);
 			text(vx, y, v, F, r, g, b, 0, 1);

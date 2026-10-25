@@ -6,8 +6,8 @@ seven sins of an afterlife trial. See [docs/design-brief.md](docs/design-brief.m
 and [docs/decisions.md](docs/decisions.md).
 
 **Status: Floor 1 prototype, in 3D.** By SaraSol Games: their mark at power-on (a sun rising over the sea, a bell chord), then a title screen (the name carved in
-stone, 640 x 480), menus (pause, options with volume, a slower game speed
-as an assist, button remapping, credits), a carved
+stone, 640 x 480), menus (pause, options with volume, button remapping,
+credits), a carved
 stone HUD in the game's own serif lettering, fades and a slow zoom onto the
 floor as it begins. The 9 x 9 floor of Sloth: carved rune
 slabs floating over a sea of ash, sunken statues in the haze, ash falling,
@@ -26,7 +26,12 @@ Circle; the soul always faces the nearest husk. Jump over the blows that
 hit the ground, strike, or hold to charge a heavy blow that breaks a husk,
 then riposte it for triple damage; drink flasks, die, rise again and fetch
 the absolution you dropped. Hit-stop, camera kicks, ash bursts and
-synthesised sound effects. When the floor is won its outer ring breaks away.
+synthesised sound effects. After each wave a breather: a little health back,
+an edge row and column crack and fall (9 x 9, 8 x 8, 7 x 7, the boss on
+6 x 6), and the next enemies rise out of the slabs as ash. Step or dodge off
+the edge and the soul falls into the void (a death). A dodge at the last
+moment slows time and gives breath back; R2 locks on to another enemy.
+When the floor is won its outer ring breaks away.
 Music synthesised for the SPU (a choir, a drone, bells, a heartbeat; a
 title theme and Sloth's floor), whispers and sighs, everything in the SPU's
 hall reverb. After the third wave, the boss: **the Unfinished**, a hollow
@@ -50,9 +55,10 @@ own icon): settings, trials, best time, totals.
 | Button | Action | Keyboard (web player) |
 |---|---|---|
 | D-pad or left stick | Walk a tile at a time (Up = away from the camera) | arrow keys |
-| Circle + direction | Dodge two tiles that way, over enemies too (invincible frames, stamina) | arrow + Z |
+| Circle + direction | Dodge two tiles that way, over enemies too (invincible frames, stamina); off the edge, you fall | arrow + Z |
 | Circle | Dodge away from the enemy you face | Z |
 | (automatic) | Face the nearest enemy, along a row or column | |
+| R2 | Lock on to the next enemy (round to the nearest again) | |
 | Square | Attack (sword: the tile in front); hold to charge a heavy blow | S |
 | X | Jump in place: ground attacks miss while you're in the air (stamina) | X |
 | Triangle | Drink a flask | A |

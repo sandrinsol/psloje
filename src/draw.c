@@ -9,6 +9,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <psxgpu.h>
 #include <psxgte.h>
 #include <inline_c.h>
@@ -521,6 +522,7 @@ static void floor_light(int x, int z, int *r, int *g, int *b) {
  * colours 4096 = 1. */
 static int fig_dir[3][3], fig_col[3][3], fig_bk[3];
 static int model_red;          /* the telegraph's red under the figure, 0..256 */
+static int model_ghost;        /* an afterimage: textured faces only, added light */
 static int model_glow = 256;   /* how bright its glowing parts are */
 /* Statues never move: their lit colours are worked out once and kept here
  * (a face's four corners), only brightened by lightning after that. */
@@ -695,7 +697,8 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 				setRGB0(q, col[0][0], col[0][1], col[0][2]);
 				setRGB1(q, col[1][0], col[1][1], col[1][2]);
 				setRGB2(q, col[2][0], col[2][1], col[2][2]);
-				q->tpage = fig_tpage;
+				q->tpage = model_ghost ? fig_tpage_add : fig_tpage;
+				if (model_ghost) setSemiTrans(q, 1);
 				q->clut = fig_clut[f->mat];
 				addPrim(slot(z), q);
 				prim += sizeof(POLY_GT3);
@@ -708,10 +711,13 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 				setRGB1(q, col[1][0], col[1][1], col[1][2]);
 				setRGB2(q, col[2][0], col[2][1], col[2][2]);
 				setRGB3(q, col[3][0], col[3][1], col[3][2]);
-				q->tpage = fig_tpage;
+				q->tpage = model_ghost ? fig_tpage_add : fig_tpage;
+				if (model_ghost) setSemiTrans(q, 1);
 				q->clut = fig_clut[f->mat];
 				addPrim(slot(z), q);
 				prim += sizeof(POLY_GT4);
+			} else if (model_ghost) {
+				/* (an afterimage has no untextured parts) */
 			} else if (tri) {
 				POLY_G3 *q = (POLY_G3 *)prim;
 				setPolyG3(q);
@@ -762,6 +768,10 @@ static void shadow(int x, int z, int r) {
 
 static int tele[MAX_N][MAX_N];
 static int32_t fall_at[MAX_N][MAX_N];   /* floor_t when each slab starts to fall */
+static uint8_t crack_t[MAX_N][MAX_N];   /* a heavy blow cracked it: fades */
+static int ticked_frame;                /* the game moved on this frame */
+static void floor_grit(int tx, int ty);
+static void glyph(uint32_t *s, int g, int cx, int cy, int size, int r, int gr, int b, int glow);
 
 static void draw_floor(int frame) {
 	int n = grid_n, px, py;
@@ -785,10 +795,21 @@ static void draw_floor(int frame) {
 			tile_world(tx * 16, ty * 16, &wx, &wz);
 			int tg = tele[ty][tx];
 			if (tg >= 256) dy = (frame & 2) ? 3 : -2;   /* the slab trembles */
+			/* The edge crumbling after a wave: it shakes, then drops away. */
+			int sl = game_slab(tx, ty);
+			if (sl >= 9999) continue;   /* gone */
+			if (sl < 0) {
+				if (sl > -50) dy = ((frame + tx * 3 + ty) & 2) ? 3 : -2;
+				else if (sl > -90) dy = ((frame + tx + ty) & 4) ? 1 : 0;
+				if (ticked_frame) floor_grit(tx, ty);
+			} else if (sl > 0) {
+				dy += sl * sl / 3;
+				if (dy > 2600) continue;
+			}
 			/* Won: the outer ring breaks away into the ash, each slab in turn,
 			 * but not while the soul stands on it. */
 			if (floor_state != F_CLEARED) fall_at[ty][tx] = 0;
-			else if ((tx == 0 || ty == 0 || tx == n - 1 || ty == n - 1) && !(tx == px && ty == py)) {
+			else if ((tx == area_x0 || ty == area_y0 || tx == area_x1 || ty == area_y1) && !(tx == px && ty == py)) {
 				if (!fall_at[ty][tx]) fall_at[ty][tx] = floor_t + 40 + (tx * 7 + ty * 13) % 40;
 				int t = floor_t - fall_at[ty][tx];
 				if (t > 0) dy += t * t / 3;
@@ -810,10 +831,10 @@ static void draw_floor(int frame) {
 			/* Inner sides are thin strips from the fixed camera: only the
 			 * platform's outer edge shows its thickness (and falling slabs). */
 			if (!dy) {
-				if (ty != 0) see[0] = 0;
-				if (ty != n - 1) see[1] = 0;
-				if (tx != n - 1) see[2] = 0;
-				if (tx != 0) see[3] = 0;
+				if (ty != area_y0) see[0] = 0;
+				if (ty != area_y1) see[1] = 0;
+				if (tx != area_x1) see[2] = 0;
+				if (tx != area_x0) see[3] = 0;
 			}
 			if (see[0] || see[3]) project(x0, dy + SLAB_DEPTH, z1, &b[0]);
 			if (see[0] || see[2]) project(x1, dy + SLAB_DEPTH, z1, &b[1]);
@@ -853,9 +874,16 @@ static void draw_floor(int frame) {
 			setRGB2(q, col[2][0], col[2][1], col[2][2]);
 			setRGB3(q, col[3][0], col[3][1], col[3][2]);
 			q->tpage = slab_tpage;
-			q->clut = slab_clut[tg >= 256 ? 2 : tg > 0 ? 1 : 0];
+			q->clut = slab_clut[tg >= 256 || (sl < 0 && sl > -40) ? 2 : tg > 0 || sl < 0 ? 1 : 0];
 			addPrim(s, q);
 			prim += sizeof(POLY_GT4);
+			/* Cracked by a heavy blow: dark lines across it, fading. */
+			if (crack_t[ty][tx] && !dy) {
+				Proj c;
+				project(wx, -2, wz, &c);
+				int k = crack_t[ty][tx] > 60 ? 60 : crack_t[ty][tx];
+				glyph(s - 1, G_SLASH, c.x, c.y, TILE_U * SCREEN_H / c.z, 120 - k * 3 / 2, 105 - k * 3 / 2, 95 - k * 3 / 2, 0);
+			}
 			/* The slab's sides: dark stone, lit like the top's edge. */
 			const Proj *quads[4][4] = {
 				{ &t[1], &t[0], &b[1], &b[0] },   /* north (+z) */
@@ -942,6 +970,14 @@ static void burst(int tx, int ty, int n, int r, int g, int b, int speed, int hei
 		spawn(PK_GLOW, x + prand(60) - 30, -height - prand(60), z + prand(60) - 30,
 		      prand(speed * 2 + 1) - speed, -prand(speed) - speed / 2, prand(speed * 2 + 1) - speed,
 		      20 + prand(20), r, g, b, 14 + prand(10), 1);
+}
+
+/* Grit falling off a crumbling slab, now and then. */
+static void floor_grit(int tx, int ty) {
+	if (prand(40)) return;
+	int x, z;
+	tile_world(tx * 16, ty * 16, &x, &z);
+	spawn(PK_ASH, x + prand(TILE_U) - TILE_U / 2, 0, z + prand(TILE_U) - TILE_U / 2, 0, 3 + prand(3), 0, 50, 130, 120, 110, 8 + prand(6), 1);
 }
 
 /* A husk breaks into stone: chunks that tumble and bounce, embers rising. */
@@ -1195,11 +1231,12 @@ static void soul_pose(Pose *ps) {
 		if (p->t >= CHARGE_FULL && (game_frames & 2)) ps->pitch[SOUL_SWORD_ARM] += 60;   /* straining */
 		break;
 	case P_ATTACK:
-		if (p->heavy) animate(&soul_anim, P_ATTACK + 100, A_SOUL_HEAVY, p->t, 30, 0, ps);
+		if (p->heavy) animate(&soul_anim, P_ATTACK + 100, A_SOUL_HEAVY, p->t, 32, 0, ps);
 		else animate(&soul_anim, P_ATTACK, A_SOUL_ATTACK, p->t, 22, 2, ps);
 		break;
 	case P_DRINK:  animate(&soul_anim, P_DRINK, A_SOUL_DRINK, p->t, 45, BLEND_FRAMES, ps); break;
 	case P_DEAD:   animate(&soul_anim, P_DEAD, A_SOUL_DEAD, p->t, 60, 4, ps); break;
+	case P_FALL:   animate(&soul_anim, P_FALL, A_SOUL_JUMP, 8 + p->t / 8, JUMP_FRAMES, 4, ps); break;
 	default:       animate(&soul_anim, P_IDLE, A_SOUL_IDLE, game_frames, 120, BLEND_FRAMES, ps); break;
 	}
 	/* Flinch when hit. */
@@ -1266,9 +1303,26 @@ static void handle_events(void) {
 		case EV_HEAVY:
 			burst(e->x, e->y, 18, 255, 220, 170, 14, 150);
 			light_tile(e->x, e->y, 255, 220, 160, 30, 24);
-			kick_x += s * 30 >> 12; kick_z += c * 30 >> 12;
-			zoom += 90;
+			kick_x += s * 48 >> 12; kick_z += c * 48 >> 12;
+			zoom += 150;
+			/* The slab under it cracks; stone flies. */
+			if (e->x >= 0 && e->y >= 0 && e->x < MAX_N && e->y < MAX_N) crack_t[e->y][e->x] = 240;
+			{
+				int x, z;
+				tile_world(e->x * 16, e->y * 16, &x, &z);
+				for (int k = 0; k < 6; k++)
+					spawn(PK_CHUNK, x + prand(100) - 50, -10, z + prand(100) - 50, prand(13) - 6, -6 - prand(8), prand(13) - 6, 40 + prand(20), 0, 0, 0, 30 + prand(30), 2);
+			}
 			break;
+		case EV_SPAWN:   /* ash drawn up out of the slab */
+			burst(e->x, e->y, 16, 140, 130, 120, 6, 40);
+			light_tile(e->x, e->y, 255, 130, 60, 20, 30);
+			break;
+		case EV_PERFECT:
+			burst(e->x, e->y, 14, 190, 220, 255, 10, 120);
+			light_tile(e->x, e->y, 170, 200, 255, 30, 30);
+			break;
+
 		case EV_RIPOSTE:
 			burst(e->x, e->y, 24, 255, 200, 120, 16, 150);
 			light_tile(e->x, e->y, 255, 200, 120, 36, 30);
@@ -1329,16 +1383,22 @@ static void handle_events(void) {
 /* ---- The frame ------------------------------------------------------------------------- */
 
 uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int ticked) {
+	ticked_frame = ticked;
+	if (ticked)
+		for (int y = 0; y < MAX_N; y++)
+			for (int x = 0; x < MAX_N; x++) if (crack_t[y][x]) crack_t[y][x]--;
+	if (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 2) memset(crack_t, 0, sizeof(crack_t));
 	ot = ot_;
 	prim = prim_;
 	prim_end = end;
 
 	/* Where the soul is (between tiles while dodging). */
 	int fx = player.x * 16, fy = player.y * 16;
-	if (player.state == P_DODGE || player.state == P_WALK) {
-		int n = player.state == P_WALK ? WALK_FRAMES : DODGE_FRAMES;
-		fx = player.from_x * 16 + (player.x - player.from_x) * 16 * player.t / n;
-		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * player.t / n;
+	if (player.state == P_DODGE || player.state == P_WALK || player.state == P_FALL) {
+		int n = player.state == P_WALK ? WALK_FRAMES : player.state == P_FALL ? 12 : DODGE_FRAMES;
+		int t = player.t < n ? player.t : n;
+		fx = player.from_x * 16 + (player.x - player.from_x) * 16 * t / n;
+		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * t / n;
 	}
 	tile_world(fx, fy, &soul_x, &soul_z);
 	/* A cancelled walk can move the soul back to its tile: glide there
@@ -1417,6 +1477,14 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		husk_pose(i, &ps);
 		/* Killed: a white flash, then it's the stone chunks. */
 		if (e->state == E_DYING && e->t > 3) continue;
+		/* Rising: ash drawn into its shape, out of the dark. */
+		int fade = 256;
+		if (e->state == E_RISE) {
+			if (e->t <= 0) continue;
+			fade = e->t * 256 / RISE_FRAMES;
+			if (ticked && (e->t & 3) == 0)
+				spawn(PK_ASH, x + prand(160) - 80, -prand(40), z + prand(160) - 80, 0, -3 - prand(3), 0, 40, 120, 116, 110, 10 + prand(8), 0);
+		}
 		int tint = e->hit_t < 5 || e->state == E_DYING ? 1 : e->state == E_STAGGER ? 3 : 0;
 		model_red = e->x >= 0 && e->x < grid_n && e->y >= 0 && e->y < grid_n ? tele[e->y][e->x] / 3 : 0;
 		/* A sleeper's embers burn low; waking, they flare. */
@@ -1433,9 +1501,15 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 					      60, k ? 255 : 120, k ? 140 : 116, k ? 60 : 110, 10 + prand(10), 0);
 			model_glow = t < 100 ? 40 : 256;
 		}
-		draw_model(model, &ps, x, wy, z, enemy_yaw[i], 256, tint, 256, 0);
+		draw_model(model, &ps, x, wy, z, enemy_yaw[i], 256, tint, fade, 0);
 		model_glow = 256;
-		if (!wy) shadow(x, z, e->kind == K_BELL ? 80 : e->kind == K_UNFINISHED ? 200 : 110);
+		if (!wy && fade > 128) shadow(x, z, e->kind == K_BELL ? 80 : e->kind == K_UNFINISHED ? 200 : 110);
+		/* Locked on (R2): pale corners around it. */
+		if (player.lock == i && player.state != P_DEAD) {
+			Proj p;
+			project(x, e->kind == K_UNFINISHED ? -260 : -150, z, &p);
+			if (p.z > NEAR_Z) glyph(slot(p.z) - 3, G_CORNERS, p.x, p.y, (e->kind == K_UNFINISHED ? 520 : 330) * SCREEN_H / p.z, 230, 210, 170, 1);
+		}
 		/* Health over it once hurt (the boss's is at the bottom). */
 		int hp_max = e->kind == K_BELL ? 40 : 60;
 		if (e->kind != K_UNFINISHED && e->hp < hp_max && e->state != E_DYING) {
@@ -1454,14 +1528,31 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		soul_pose(&ps);
 		int tint = player.hurt_t < 8 ? 2 : 0;
 		int dodge_glow = player.state == P_DODGE && player.t >= IFRAME_FIRST && player.t <= IFRAME_LAST;
-		model_red = tele[player.y][player.x] / 3;
+		int tx, ty;
+		game_player_tile(&tx, &ty);
+		model_red = tx >= 0 && ty >= 0 && tx < MAX_N && ty < MAX_N ? tele[ty][tx] / 3 : 0;
 		model_glow = soul_glow;
-		draw_model(&soul_model, &ps, soul_x, 0, soul_z, player.facing * 1024, dodge_glow ? 300 : 256, tint, 256, 1);
+		/* Off the edge: it drops away into the dark below. */
+		int drop = player.state == P_FALL && player.t > 10 ? (player.t - 10) * (player.t - 10) * 3 : 0;
+		int gone = player.state == P_DEAD && game_fell();
+		/* Dodging, unhurtable: pale afterimages where it just was. */
+		if (dodge_glow) {
+			for (int k = 2; k >= 1; k--) {
+				int t = player.t - k * 2;
+				int gx, gz;
+				tile_world(player.from_x * 16 + (player.x - player.from_x) * 16 * t / DODGE_FRAMES,
+				           player.from_y * 16 + (player.y - player.from_y) * 16 * t / DODGE_FRAMES, &gx, &gz);
+				model_ghost = 1;
+				draw_model(&soul_model, &ps, gx, 0, gz, player.facing * 1024, 256, 3, 130 - k * 45, 1);
+				model_ghost = 0;
+			}
+		}
+		if (!gone) draw_model(&soul_model, &ps, soul_x, drop, soul_z, player.facing * 1024, dodge_glow ? 300 : 256, tint, drop ? (drop < 1200 ? 256 - drop / 6 : 56) : 256, 1);
 		model_glow = 256;
 		/* Off the ground: the shadow shrinks under it. */
-		shadow(soul_x, soul_z, 80 + (ps.dy < 0 ? ps.dy / 4 : 0));
+		if (!gone && player.state != P_FALL) shadow(soul_x, soul_z, 80 + (ps.dy < 0 ? ps.dy / 4 : 0));
 		/* The sword's arc as it strikes. */
-		int strike = player.heavy ? 6 : 8;
+		int strike = 8;   /* light and heavy both land on frame 8 */
 		if (player.state == P_ATTACK && player.t >= strike && player.t < strike + 5) {
 			static const int8_t DX[4] = { 0, 1, 0, -1 }, DY[4] = { -1, 0, 1, 0 };
 			int ax, az;
