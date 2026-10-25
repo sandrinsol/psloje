@@ -16,4 +16,6 @@ void load_tim(const uint32_t *data);
 void draw_void_colour(Colour *c);
 /* Adds the frame to the ordering table; returns the next free prim byte.
  * ticked: the game moved on this frame (not paused or held back). */
+/* Set while paused: the HUD keeps to its panels (no messages over the menu). */
+extern int hud_quiet;
 uint8_t *draw_frame(uint32_t *ot, uint8_t *prim, uint8_t *end, int frame, int ticked);

@@ -1066,6 +1066,8 @@ static void box2d(int layer, int x, int y, int w, int h, int r, int g, int b) {
 	prim += sizeof(TILE);
 }
 
+int hud_quiet;
+
 static const char *ROMAN[] = { "I", "II", "III", "IV", "V", "VI", "VII" };
 
 /* The HUD: two carved panels on top (life, stamina, flasks; absolution),
@@ -1091,6 +1093,7 @@ static void draw_hud(int frame) {
 		sprintf(line, "WAVE %s", ROMAN[wave < 3 ? wave : 2]);
 		text(202, 11, line, FONT_SMALL, 170, 160, 150, 1, 0);
 	}
+	if (hud_quiet) { prim = ui_end(); return; }
 	/* The boss: letterbox bars and its name carved, then its life along
 	 * the bottom. */
 	if (floor_state == F_BOSS_INTRO) {
@@ -1124,14 +1127,15 @@ static void draw_hud(int frame) {
 	if (message && (message_t > 0 || floor_state == F_DEAD || floor_state == F_CLEARED)) {
 		int big = text_width(message, FONT_LARGE) <= 280;
 		int dead = floor_state == F_DEAD;
-		int y = dead ? 82 : 92;
-		dark_box(0, y, 320, big ? 38 : 26, 120, 2);
+		int y = dead ? 78 : 92;
+		/* Dead: the band holds the way back up and the guilt as well. */
+		dark_box(0, y - (dead ? 4 : 0), 320, dead ? 86 : big ? 38 : 26, dead ? 150 : 120, 2);
 		text(160, y + (big ? 5 : 6), message, big ? FONT_LARGE : FONT_SMALL, dead ? 210 : 220, dead ? 50 : 200, dead ? 40 : 160, 1, 0);
 	}
 	if (floor_state == F_DEAD) {
-		if (floor_t > 90 && (game_frames & 32)) text(160, 126, "PRESS CROSS TO RISE AGAIN", FONT_SMALL, 200, 190, 180, 1, 0);
+		if (floor_t > 90 && (game_frames & 32)) text(160, 122, "PRESS CROSS TO RISE AGAIN", FONT_SMALL, 200, 190, 180, 1, 0);
 		sprintf(line, "GUILT %d", guilt + 1);
-		text(160, 148, line, FONT_SMALL, 150, 120, 110, 1, 0);
+		text(160, 141, line, FONT_SMALL, 150, 120, 110, 1, 0);
 	}
 	prim = ui_end();
 }

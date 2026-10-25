@@ -371,8 +371,8 @@ int menu_update(uint16_t held, uint16_t pressed) {
 	case MENU_CREDITS:
 		if (ok || back) { menu = back_to; sel = 3; }
 		break;
-	case MENU_TRIALS:
-		if (ok || back) { menu = back_to; sel = 1; }
+	case MENU_TRIALS:   /* only ever opened from the title */
+		if (ok || back) { menu = MENU_TITLE; sel = 1; }
 		break;
 	}
 	return UI_NOTHING;
@@ -400,6 +400,7 @@ void menu_draw(int frame) {
 			"PSN00BSDK", "", "LETTERING", "LIBERATION SERIF (SIL OFL)", "",
 			"THANK YOU FOR PLAYING",
 		};
+		lh = lh * 3 / 4;   /* thirteen lines: all on the screen */
 		int n = sizeof(C) / sizeof(C[0]), y0 = SH() / 2 - n * lh / 2 + lh / 2;
 		panel(cx - (hi ? 260 : 130), y0 - lh, hi ? 520 : 260, n * lh + lh / 2, 3);
 		for (int i = 0; i < n; i++) {
@@ -417,25 +418,30 @@ void menu_draw(int frame) {
 		panel(cx - pw2 / 2, y0 - rh / 2, pw2, NUM_TRIALS * rh + rh, 3);
 		for (int i = 0; i < NUM_TRIALS; i++) {
 			int met = (record.trials >> i) & 1, on = i == sel, y = y0 + i * rh;
-			int r = met ? 230 : 110, g = met ? 200 : 104, b = met ? 130 : 100;
-			if (on) { r += 20; g += 20; b += 10; }
+			int r = met ? 225 : 120, g = met ? 195 : 114, b = met ? 130 : 108;
+			if (on) {
+				int pulse = isin((frame * 100) & 4095) * 10 >> 12;
+				r = met ? 250 : 210 + pulse; g = met ? 225 : 196 + pulse; b = met ? 150 : 170;
+			}
 			text(cx - pw2 / 2 + (hi ? 44 : 22), y, TRIAL_NAMES[i], hi ? FONT_LARGE : FONT_SMALL, r > 255 ? 255 : r, g, b, 0, 1);
 			if (met) tile(cx - pw2 / 2 + (hi ? 18 : 9), y + (hi ? 10 : 5), hi ? 10 : 5, hi ? 10 : 5, 240, 170, 70, 1);
-			if (on) tile(cx - pw2 / 2 + (hi ? 8 : 4), y + (hi ? 12 : 6), hi ? 4 : 2, hi ? 4 : 2, 230, 190, 120, 1);
+			if (on) tile(cx - pw2 / 2 + (hi ? 4 : 2), y + (hi ? 11 : 5), hi ? 8 : 4, hi ? 8 : 4, 230, 190, 120, 1);
 		}
 		int yb = y0 + NUM_TRIALS * rh + (hi ? 24 : 10);
 		text(cx, yb, TRIAL_TEXTS[sel], hi ? FONT_LARGE : FONT_SMALL, 180, 170, 156, 1, 1);
 		char best[16] = "--:--";
 		if (record.best_time) time_text(best, record.best_time);
 		sprintf(line, "BEST %s   DESTROYED %d   DEATHS %d", best, record.bosses, (int)record.deaths);
-		text(cx, yb + (hi ? 40 : 18), line, FONT_SMALL, 140, 132, 124, 1, 1);
+		text(cx, yb + (hi ? 40 : 18), line, hi ? FONT_LARGE : FONT_SMALL, 140, 132, 124, 1, 1);
 		return;
 	}
 
 	const Item *items = menu == MENU_TITLE ? TITLE_ITEMS : menu == MENU_PAUSE ? PAUSE_ITEMS : OPTION_ITEMS;
 	int n = count();
 	int pw = hi ? (menu == MENU_TITLE ? 360 : 520) : (menu == MENU_TITLE ? 180 : 260);
-	int y0 = menu == MENU_TITLE ? SH() * 3 / 5 : SH() / 2 - n * lh / 2;
+	if (menu == MENU_TITLE) lh = lh * 9 / 10;   /* four items, clear of the hint below */
+	if (n > 5) lh = lh * 17 / 20;                 /* the controls: room for the heading */
+	int y0 = menu == MENU_TITLE ? SH() * 9 / 16 : SH() / 2 - n * lh / 2;
 	if (menu == MENU_PAUSE || menu == MENU_OPTIONS || menu == MENU_CONTROLS) {
 		const char *title = menu == MENU_PAUSE ? "PAUSED" : menu == MENU_OPTIONS ? "OPTIONS" : "CONTROLS";
 		text(cx, y0 - lh * 2, title, hi ? FONT_LARGE : FONT_LARGE, 210, 196, 170, 1, 1);
@@ -474,7 +480,7 @@ void menu_draw(int frame) {
 		}
 	}
 	if (menu == MENU_TITLE && (frame & 32))
-		text(cx, SH() - (hi ? 50 : 24), "CROSS: CHOOSE", hi ? FONT_SMALL : FONT_SMALL, 110, 104, 98, 1, 1);
+		text(cx, SH() - (hi ? 58 : 24), "CROSS: CHOOSE", hi ? FONT_LARGE : FONT_SMALL, 110, 104, 98, 1, 1);
 	/* The pause menu darkens the fight behind it. */
 	if (menu != MENU_TITLE && !hi) dark_box(0, 0, SW(), SH(), 110, 6);
 }

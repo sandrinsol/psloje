@@ -279,13 +279,20 @@ int main(int argc, const char **argv) {
 
 		ClearOTagR(b->ot, OT_LEN);
 		uint8_t *prim = b->prims, *end = b->prims + PRIM_LEN - 1024;
+		/* The fade first in the top slot: drawn over everything after it there,
+		 * the HUD too. */
+		ui_begin(b->ot, prim, end);
+		fade_draw();
+		prim = ui_end();
+		hud_quiet = paused;
 		if (screen == SCREEN_GAME) prim = draw_frame(b->ot, prim, end, frame_count, ticked);
 		ui_begin(b->ot, prim, end);
-		fade_draw();   /* first in the top slot: over everything */
 		if (screen == SCREEN_TITLE) {
 			if (!title_ready && (frame_count & 32))
 				text(320, 360, "PRESS START", FONT_LARGE, 200, 186, 160, 1, 1);
 			menu_draw(frame_count);
+			if (save_state < 0)
+				text(320, 460, "NO MEMORY CARD IN SLOT 1: NOTHING WILL BE SAVED", FONT_SMALL, 150, 110, 100, 1, 1);
 			title_draw(frame_count, menu_current() == MENU_TITLE || !title_ready);
 		} else if (screen == SCREEN_OPENING) {
 			opening_draw(story_t);
