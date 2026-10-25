@@ -34,8 +34,9 @@ What was decided on top of the [design brief](design-brief.md).
 | Triangle | Drink a flask (takes time, you can be hit) |
 | L1 / R1 | The two active skills |
 
-Block and parry (and the riposte) were removed after playing: the jump and
-the charged heavy blow took their place.
+Block and parry were removed after playing: the jump and the charged heavy
+blow took their place. The heavy blow (and later damage skills) breaks a
+husk; any hit on a broken husk is a riposte, 3x damage.
 
 ## Death and progression
 - Each floor: waves of enemies, then the boss. Dying restarts the floor.

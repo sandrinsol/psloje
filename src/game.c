@@ -19,7 +19,8 @@
 #define HEAVY_WINDUP    6      /* charged: hits on frame 6 of the swing */
 #define HEAVY_FRAMES    30
 #define HEAVY_COST      (30 * 16)
-#define HEAVY_DAMAGE    50     /* and it staggers */
+#define HEAVY_DAMAGE    50     /* and it breaks the husk (staggers it) */
+#define RIPOSTE_FACTOR  3      /* any hit on a broken husk */
 #define JUMP_COST       (20 * 16)
 #define STAMINA_REGEN   13     /* /16 a frame: ~49 a second */
 #define STAMINA_WAIT    15
@@ -275,20 +276,23 @@ static void sword_hits(void) {
 	if (i < 0)
 		return;
 	Enemy *e = &enemies[i];
-	int heavy = player.heavy;
-	e->hp -= heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE;
+	int heavy = player.heavy, riposte = e->state == E_STAGGER;
+	e->hp -= (heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE) * (riposte ? RIPOSTE_FACTOR : 1);
 	e->hit_t = 0;
-	shake_t = heavy ? 8 : 3;
-	hitstop(heavy ? 9 : 4);
-	emit(heavy ? EV_HEAVY : EV_HIT, tx, ty);
+	shake_t = riposte ? 12 : heavy ? 8 : 3;
+	hitstop(riposte ? 12 : heavy ? 9 : 4);
+	emit(riposte ? EV_RIPOSTE : heavy ? EV_HEAVY : EV_HIT, tx, ty);
 	if (e->hp <= 0) {
 		e->state = E_DYING;
 		e->t = 0;
 		absolution += HUSK_REWARD;
 		enemies_alive--;
 		emit(EV_KILL, tx, ty);
+	} else if (riposte) {
+		e->state = E_IDLE;      /* the opening is spent */
+		e->t = 0;
 	} else if (heavy) {
-		e->state = E_STAGGER;   /* the blow breaks its attack */
+		e->state = E_STAGGER;   /* broken: open to a riposte */
 		e->t = 0;
 	}
 }

@@ -5,7 +5,8 @@
  * 0..N-1; facing 0 = up the grid). The D-pad walks a tile at a time;
  * Circle (+ a direction) dodges, with invincible frames, for stamina; Cross
  * jumps in place, over the blows that hit the ground; Square attacks, held
- * it charges a heavy blow. The soul always faces the nearest enemy along a
+ * it charges a heavy blow, which breaks a husk (staggers it): the next hit on
+ * a broken husk is a riposte, triple damage. The soul always faces the nearest enemy along a
  * row or column. Enemies light up the tiles they're about to hit: faint
  * first, bright just before.
  */
@@ -79,7 +80,7 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND };
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE };
 typedef struct {
 	int16_t type, x, y;   /* tile */
 } GameEvent;

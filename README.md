@@ -20,7 +20,8 @@ A fixed camera looks at the whole floor from the south, high and tilted. Three w
 their arms over their heads, and the runes of the slabs they're about to
 hit glow, then burn (your own slab flashes red). Walk with the D-pad, dodge with
 Circle; the soul always faces the nearest husk. Jump over the blows that
-hit the ground, strike, or hold to charge a heavy blow that staggers; drink flasks, die, rise again and fetch
+hit the ground, strike, or hold to charge a heavy blow that breaks a husk,
+then riposte it for triple damage; drink flasks, die, rise again and fetch
 the absolution you dropped. Hit-stop, camera kicks, ash bursts and
 synthesised sound effects. When the floor is won its outer ring breaks away.
 60 fps. No boss, music or skills yet.

@@ -1205,6 +1205,11 @@ static void handle_events(void) {
 			kick_x += s * 30 >> 12; kick_z += c * 30 >> 12;
 			zoom += 90;
 			break;
+		case EV_RIPOSTE:
+			burst(e->x, e->y, 24, 255, 200, 120, 16, 150);
+			light_tile(e->x, e->y, 255, 200, 120, 36, 30);
+			zoom += 120;
+			break;
 		case EV_KILL:
 			shatter(e->x, e->y);
 			light_tile(e->x, e->y, 255, 120, 40, 28, 40);
