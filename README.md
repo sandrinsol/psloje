@@ -50,7 +50,7 @@ own icon): settings, trials, best time, totals.
 | Button | Action | Keyboard (web player) |
 |---|---|---|
 | D-pad or left stick | Walk a tile at a time (Up = away from the camera) | arrow keys |
-| Circle + direction | Dodge that way (invincible frames, stamina) | arrow + Z |
+| Circle + direction | Dodge two tiles that way, over enemies too (invincible frames, stamina) | arrow + Z |
 | Circle | Dodge away from the enemy you face | Z |
 | (automatic) | Face the nearest enemy, along a row or column | |
 | Square | Attack (sword: the tile in front); hold to charge a heavy blow | S |

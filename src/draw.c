@@ -765,9 +765,7 @@ static int32_t fall_at[MAX_N][MAX_N];   /* floor_t when each slab starts to fall
 
 static void draw_floor(int frame) {
 	int n = grid_n, px, py;
-	int moving = (player.state == P_DODGE || player.state == P_WALK) && player.t < 5;
-	px = moving ? player.from_x : player.x;
-	py = moving ? player.from_y : player.y;
+	game_player_tile(&px, &py);
 	int any_tele = 0;
 	for (int y = 0; y < n; y++)
 		for (int x = 0; x < n; x++) any_tele |= tele[y][x] = game_telegraph(x, y);
@@ -1190,7 +1188,7 @@ static void soul_pose(Pose *ps) {
 	const Player *p = &player;
 	switch (p->state) {
 	case P_WALK:   animate(&soul_anim, P_WALK, A_SOUL_WALK, p->t, WALK_FRAMES, BLEND_FRAMES, ps); break;
-	case P_DODGE:  animate(&soul_anim, P_DODGE, A_SOUL_DODGE, p->t, 9, 2, ps); break;
+	case P_DODGE:  animate(&soul_anim, P_DODGE, A_SOUL_DODGE, p->t, DODGE_FRAMES, 2, ps); break;
 	case P_JUMP:   animate(&soul_anim, P_JUMP, A_SOUL_JUMP, p->t, JUMP_FRAMES, 3, ps); break;
 	case P_CHARGE:
 		animate(&soul_anim, P_CHARGE, A_SOUL_CHARGE, p->t, CHARGE_FULL, 3, ps);
@@ -1338,7 +1336,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 	/* Where the soul is (between tiles while dodging). */
 	int fx = player.x * 16, fy = player.y * 16;
 	if (player.state == P_DODGE || player.state == P_WALK) {
-		int n = player.state == P_WALK ? WALK_FRAMES : 9;
+		int n = player.state == P_WALK ? WALK_FRAMES : DODGE_FRAMES;
 		fx = player.from_x * 16 + (player.x - player.from_x) * 16 * player.t / n;
 		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * player.t / n;
 	}
@@ -1349,7 +1347,8 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		static int32_t shown_x, shown_z, off_x, off_z;
 		int dx = soul_x + off_x - shown_x, dz = soul_z + off_z - shown_z;
 		if (floor_t < 2 && floor_state == F_WAVE_INTRO && wave == 0) off_x = off_z = 0;
-		else if (dx * dx + dz * dz > 40 * 40 && dx * dx + dz * dz < 400 * 400) { off_x = shown_x - soul_x; off_z = shown_z - soul_z; }
+		/* (a jump of more than a dodge moves in a frame: two tiles in 12, 43) */
+		else if (dx * dx + dz * dz > 60 * 60 && dx * dx + dz * dz < 400 * 400) { off_x = shown_x - soul_x; off_z = shown_z - soul_z; }
 		soul_x += off_x;
 		soul_z += off_z;
 		shown_x = soul_x;
@@ -1454,7 +1453,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		Pose ps;
 		soul_pose(&ps);
 		int tint = player.hurt_t < 8 ? 2 : 0;
-		int dodge_glow = player.state == P_DODGE && player.t >= 2 && player.t <= 7;
+		int dodge_glow = player.state == P_DODGE && player.t >= IFRAME_FIRST && player.t <= IFRAME_LAST;
 		model_red = tele[player.y][player.x] / 3;
 		model_glow = soul_glow;
 		draw_model(&soul_model, &ps, soul_x, 0, soul_z, player.facing * 1024, dodge_glow ? 300 : 256, tint, 256, 1);

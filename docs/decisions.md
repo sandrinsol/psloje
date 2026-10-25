@@ -26,7 +26,7 @@ What was decided on top of the [design brief](design-brief.md).
 | Button | Action |
 |---|---|
 | D-pad | Walk one tile (20 frames, no stamina), screen directions |
-| Circle + direction | Dodge that way (9 frames, 6 invincible, 25 % stamina) |
+| Circle + direction | Dodge two tiles that way, over an enemy too (12 frames, 8 invincible, 25 % stamina); one tile if the second is off the floor or taken |
 | Circle alone | Dodge away from the enemy you face |
 | (automatic) | Face the nearest enemy along a row or column; exactly diagonal: keep facing |
 | Square | Attack: windup, hit, recovery; stamina. Held 30 frames: a heavy blow (2.5x damage, staggers), on release |
