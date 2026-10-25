@@ -99,6 +99,7 @@ static void emit(int type, int x, int y) {
 		game_events[num_events].type = type;
 		game_events[num_events].x = x;
 		game_events[num_events].y = y;
+		game_events[num_events].v = 0;
 		num_events++;
 	}
 }
@@ -126,6 +127,7 @@ static int inside(int x, int y) {
 }
 
 int game_fell(void) { return fell; }
+void game_death_tile(int *x, int *y) { *x = fell ? fall_x : player.x; *y = fell ? fall_y : player.y; }
 
 int game_slab(int x, int y) {
 	if (x < 0 || y < 0 || x >= MAX_N || y >= MAX_N) return 9999;
@@ -348,8 +350,7 @@ void game_player_tile(int *x, int *y) { player_tile(x, y); }
 /* Two tiles, over an enemy if need be (one if the second is taken); off
  * the edge, it lands on nothing and falls. */
 static int try_dodge(int dir) {
-	if (player.stamina <= 0)
-		return 0;
+	if (player.stamina <= 0) { emit(EV_TIRED, player.x, player.y); return 0; }
 	int nx = -99, ny = -99;
 	for (int d = DODGE_TILES; d >= 1 && nx == -99; d--) {
 		int tx = player.x + DX[dir] * d, ty = player.y + DY[dir] * d;
@@ -413,8 +414,7 @@ static void face_nearest(void) {
 /* The swing itself: light, or heavy after a full charge. */
 static int swing(int heavy) {
 	int cost = heavy ? HEAVY_COST : ATTACK_COST;
-	if (player.stamina <= 0)
-		return 0;
+	if (player.stamina <= 0) { emit(EV_TIRED, player.x, player.y); return 0; }
 	player.state = P_ATTACK;
 	player.heavy = heavy;
 	player.t = 0;
@@ -425,8 +425,7 @@ static int swing(int heavy) {
 }
 
 static int try_jump(void) {
-	if (player.stamina <= 0)
-		return 0;
+	if (player.stamina <= 0) { emit(EV_TIRED, player.x, player.y); return 0; }
 	player.state = P_JUMP;
 	player.t = 0;
 	player.stamina -= JUMP_COST;
@@ -444,11 +443,13 @@ static void sword_hits(void) {
 	if (e->state == E_RISE)
 		return;   /* still ash */
 	int heavy = player.heavy, riposte = e->state == E_STAGGER, asleep = e->state == E_SLEEP;
-	e->hp -= (heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE) * (riposte ? RIPOSTE_FACTOR : asleep ? SLEEP_FACTOR : 1);
+	int damage = (heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE) * (riposte ? RIPOSTE_FACTOR : asleep ? SLEEP_FACTOR : 1);
+	e->hp -= damage;
 	e->hit_t = 0;
 	shake_t = riposte ? 12 : heavy ? 14 : 3;
 	hitstop(riposte ? 12 : heavy ? 13 : 4);
 	emit(riposte ? EV_RIPOSTE : heavy ? EV_HEAVY : EV_HIT, tx, ty);
+	if (num_events) game_events[num_events - 1].v = damage;
 	if (riposte) { stats.ripostes++; trial(TRIAL_RIPOSTE); }
 	if (e->hp <= 0) {
 		e->state = E_DYING;
@@ -476,6 +477,7 @@ static void sword_hits(void) {
 	} else if (heavy) {
 		e->state = E_STAGGER;   /* broken: open to a riposte */
 		e->t = 0;
+		emit(EV_BROKEN, tx, ty);
 	}
 }
 
@@ -589,6 +591,7 @@ static void update_player(const Input *in) {
 		} else if (p->buffered == BUF_ATTACK) {
 			/* Square starts the charge; let go at once and it's a plain swing. */
 			if (p->stamina > 0) { p->state = P_CHARGE; p->t = 0; }
+			else emit(EV_TIRED, p->x, p->y);
 			p->buffered = BUF_NONE;
 		} else if (p->buffered == BUF_JUMP) {
 			try_jump();

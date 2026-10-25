@@ -76,15 +76,13 @@ put(0, 1, (x, y) => {
   const v = clN(x, y) * (1 - r) * 22;
   return v < 1.5 ? 0 : q(v);
 });
-// The eye in the sky: a pale almond with a dark slit.
+// The eye in the sky: a pale almond, darker towards its corners (the iris
+// and its slit are drawn over it in the game, to follow the soul).
 put(1, 1, (x, y) => {
   const dx = (x - 31.5) / 30, dy = (y - 31.5) / 14;
   const inAlmond = Math.abs(dy) < 1 - dx * dx;
   if (!inAlmond) return 0;
-  const slit = Math.abs(x - 31.5) < 3 - Math.abs(y - 31.5) / 8;
-  if (slit) return 1;
-  const iris = Math.hypot(x - 31.5, (y - 31.5) * 1.6) < 13;
-  return iris ? q(6 + Math.hypot(x - 31.5, y - 31.5) / 2) : q(12 + rnd() * 2);
+  return q(13 - Math.abs(dx) * 4 - Math.abs(dy) * 2 + rnd() * 2);
 });
 // Stone chunk: an irregular shard.
 put(2, 1, (x, y) => {

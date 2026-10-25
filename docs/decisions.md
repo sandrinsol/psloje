@@ -6,9 +6,11 @@ What was decided on top of the [design brief](design-brief.md).
 - Real PS1 homebrew: C and PSn00bSDK, tested with ps1-test, 60 fps.
 - Low-poly 3D, dark gothic: carved stone slabs with runes, robed figures,
   a sky gradient and set pieces per sin (Sloth: ash, sunken statues).
-- A fixed camera from the south, high and tilted, showing the whole floor
-  (it followed the soul at first: changed after playing); your own slab
-  flashes red when it's about to be hit.
+- A camera from the south, high and tilted, that frames the fight: the
+  soul, the enemies and any slab about to be struck, at least 5 tiles
+  across (closer when it's all near the soul, wider as it spreads); the
+  whole floor between waves and on death. Your own slab flashes red when
+  it's about to be hit.
 - Atmosphere: the soul carries a light, ash / embers fall, the outer ring of
   the floor breaks away when it's won. Clouds, a distant eye in the sky,
   lightning.
@@ -19,7 +21,19 @@ What was decided on top of the [design brief](design-brief.md).
 - Tiles do more than telegraphs only on some floors, through their bosses.
 - Glyphs (`tools/makeglyphs.mjs`) only for the HUD.
 - HUD: health and stamina bars, flasks, absolution on top; boss name and
-  health at the bottom during boss fights.
+  health at the bottom during boss fights. What a blow took stays pale on
+  the health bar a moment, then drains; the stamina bar flashes red when an
+  action wanted more than there was. Damage rises off the enemy hit (gold
+  for a riposte), "BROKEN" over a husk a heavy blow breaks; a small health
+  bar over hurt enemies.
+- The soul: an ivory robe, a pale rim light from behind, a warm glow on the
+  stone around it.
+- Around the floor: two pillars sunk in the void, chains hanging from far
+  above. The eye in the sky watches the soul and narrows while the
+  Unfinished fights.
+- Death: the colour drains to black and white; the flame left last time
+  gutters out and a new one, the only colour, marks where the absolution
+  will wait.
 - English.
 
 ## Studio

@@ -246,11 +246,65 @@ static void tile_world(int tx16, int ty16, int *x, int *z) {
 	*z = (half - ty16) * TILE_U / 16;
 }
 
-/* The camera stays put: south of the floor, high, looking down at its
- * middle, far enough back to see all of it. */
+static int tele[MAX_N][MAX_N];   /* each slab's telegraph, as last drawn */
+
+/* What the camera frames: the soul, the enemies and any slab about to be
+ * struck, at least 5 tiles across, never past the floor still standing.
+ * Its middle (world x, z) and how many tiles wide, eased towards. */
+static int32_t frame_x, frame_z, frame_w = 9 << 8;   /* x 256 */
+
+static void update_framing(void) {
+	int x0 = player.x, x1 = player.x, y0 = player.y, y1 = player.y;
+	if (player.state == P_DEAD || player.state == P_FALL) { x0 = x1 = player.from_x; y0 = y1 = player.from_y; }
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		const Enemy *e = &enemies[i];
+		if (e->state == E_NONE || e->state == E_DYING) continue;
+		if (e->x < x0) x0 = e->x;
+		if (e->x > x1) x1 = e->x;
+		if (e->y < y0) y0 = e->y;
+		if (e->y > y1) y1 = e->y;
+	}
+	for (int y = area_y0; y <= area_y1; y++)
+		for (int x = area_x0; x <= area_x1; x++)
+			if (tele[y][x]) {   /* (as the floor was last drawn) */
+				if (x < x0) x0 = x;
+				if (x > x1) x1 = x;
+				if (y < y0) y0 = y;
+				if (y > y1) y1 = y;
+			}
+	/* At least 5 across (the camera sees more width than depth), within
+	 * the floor; a breather or a death shows the whole floor. */
+	int w = x1 - x0 + 1, h = (y1 - y0 + 1) * 5 / 4;
+	int span = w > h ? w : h;
+	int full = (area_x1 - area_x0 > area_y1 - area_y0 ? area_x1 - area_x0 : area_y1 - area_y0) + 1;
+	if (span < 5) span = 5;
+	if (floor_state != F_FIGHT) span = full, x0 = area_x0, x1 = area_x1, y0 = area_y0, y1 = area_y1;
+	if (span > full) span = full;
+	int cx, cz;
+	tile_world((x0 + x1) * 8, (y0 + y1) * 8, &cx, &cz);
+	/* Kept over the floor: the middle can't wander off what's standing. */
+	int ax0, az0, ax1, az1;
+	tile_world(area_x0 * 16, area_y1 * 16, &ax0, &az0);
+	tile_world(area_x1 * 16, area_y0 * 16, &ax1, &az1);
+	int mx = (span - 1) * TILE_U / 2;
+	int lo = ax0 + mx, hi = ax1 - mx;
+	if (lo > hi) lo = hi = (ax0 + ax1) / 2;
+	cx = cx < lo ? lo : cx > hi ? hi : cx;
+	lo = az0 + mx; hi = az1 - mx;
+	if (lo > hi) lo = hi = (az0 + az1) / 2;
+	cz = cz < lo ? lo : cz > hi ? hi : cz;
+	frame_x += (cx - frame_x) / 24;
+	frame_z += (cz - frame_z) / 24;
+	frame_w += ((span << 8) - frame_w) / 30;
+}
+
+/* The camera: south of the floor, high, looking down; it frames the fight
+ * (closer when it's all near the soul, wider as it spreads). */
 static void update_camera(int frame) {
 	int sp = isin(CAM_PITCH), cp = icos(CAM_PITCH);
-	int dist = grid_n * CAM_DIST_PER_TILE - zoom;
+	if (frame_w <= 0 || (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 2)) { frame_x = frame_z = 0; frame_w = grid_n << 8; }
+	update_framing();
+	int dist = (frame_w * CAM_DIST_PER_TILE >> 8) - zoom;
 	/* A floor begins: the camera drifts in from far above. */
 	if (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 150) {
 		int k = 150 - floor_t;
@@ -258,14 +312,17 @@ static void update_camera(int frame) {
 	}
 	/* The boss's entrance: the camera swings in close to where it rises,
 	 * round to one side, and back. */
-	int pan_x = 0, look_z = CAM_LOOK_Z;
+	int pan_x = frame_x, look_z = CAM_LOOK_Z * frame_w / (grid_n << 8) + frame_z;
 	if (floor_state == F_BOSS_INTRO && boss >= 0) {
 		int t = floor_t > BOSS_INTRO ? BOSS_INTRO : floor_t, k = isin(t * 2048 / BOSS_INTRO);   /* 0 .. 1 .. 0 */
 		int bx, bz;
 		tile_world(enemies[boss].x * 16, enemies[boss].y * 16, &bx, &bz);
+		/* (from as far as the whole grid: the framing's 6 x 6 would be too close) */
+		int far = grid_n * CAM_DIST_PER_TILE - zoom;
+		dist += (far - dist) * k >> 12;
 		dist -= 650 * k >> 12;
-		pan_x = (bx * k >> 12) + (isin(t * 4096 / BOSS_INTRO) * 220 >> 12);
-		look_z += (bz + 420 - CAM_LOOK_Z) * k >> 12;   /* aim up at it: it's tall */
+		pan_x += ((bx - pan_x) * k >> 12) + (isin(t * 4096 / BOSS_INTRO) * 220 >> 12);
+		look_z += (bz + 420 - look_z) * k >> 12;   /* aim up at it: it's tall */
 	}
 	cam_x = kick_x + pan_x;
 	cam_y = -(dist * sp >> 12);
@@ -350,9 +407,14 @@ static void draw_sky(int frame) {
 		int c = 30 + flash / 4;
 		sprite(s, x, y, 64, 18, FX_CLOUD, CLUT_CLOUD, c, c, c + 4, 1, i & 1);
 	}
-	/* The eye, far off above the floor. It blinks; it closes as you die. */
+	/* The eye, far off above the floor. It blinks; it watches the soul; it
+	 * narrows while the Unfinished fights; it closes as you die. */
 	int open = 4096, t = frame % 640;
 	if (t < 18) open = 4096 - isin(t * 2048 / 18);
+	static int squint = 4096;
+	int want = boss >= 0 && (floor_state == F_FIGHT || floor_state == F_BOSS_INTRO) ? 2300 : 4096;
+	squint += (want - squint) / 20;
+	open = open * squint >> 12;
 	if (death_t >= 0) open = open * (death_t < 90 ? 90 - death_t : 0) / 90;
 	int hh = 15 * open >> 12;
 	if (hh > 0) {
@@ -360,6 +422,41 @@ static void draw_sky(int frame) {
 		int ec[3] = { c * 5 / 4, c, c * 7 / 8 };
 		grade(&ec[0], &ec[1], &ec[2]);
 		sprite(s, 160, 40, 40, hh, FX_EYE, CLUT_EYE, clamp255(ec[0]), clamp255(ec[1]), clamp255(ec[2]), 0, 0);
+		/* Its iris turned towards the soul, and the slit in it. */
+		static int look_x, look_y;
+		Proj sp;
+		project(soul_x, -100, soul_z, &sp);
+		int lx = (sp.x - 160) * 12 / 160, ly = (sp.y - 150) * 4 / 120;
+		lx = lx < -12 ? -12 : lx > 12 ? 12 : lx;
+		ly = ly < -3 ? -3 : ly > 3 ? 3 : ly;
+		look_x += (lx * 16 - look_x) / 8;
+		look_y += (ly * 16 - look_y) / 8;
+		int ix = 160 + look_x / 16, iy = 40 + look_y / 16 * hh / 15;
+		int rx = 10, ry = hh - 3 < 8 ? hh - 3 : 8;
+		int ic[3] = { 46 + flash / 4, 20 + flash / 6, 12 }, oc[3] = { 150, 96, 52 };   /* dark in the middle, amber at the rim */
+		grade(&ic[0], &ic[1], &ic[2]);
+		grade(&oc[0], &oc[1], &oc[2]);
+		uint32_t *si = s - 1;
+		for (int i = 0; ry > 0 && i < 12 && prim + sizeof(POLY_G3) < prim_end; i++) {
+			int a0 = i * 4096 / 12, a1 = (i + 1) * 4096 / 12;
+			POLY_G3 *g = (POLY_G3 *)prim;
+			setPolyG3(g);
+			setXY3(g, ix, iy, ix + (icos(a0) * rx >> 12), iy + (isin(a0) * ry >> 12), ix + (icos(a1) * rx >> 12), iy + (isin(a1) * ry >> 12));
+			setRGB0(g, clamp255(ic[0]), clamp255(ic[1]), clamp255(ic[2]));
+			setRGB1(g, clamp255(oc[0]), clamp255(oc[1]), clamp255(oc[2]));
+			setRGB2(g, clamp255(oc[0]), clamp255(oc[1]), clamp255(oc[2]));
+			addPrim(si, g);
+			prim += sizeof(POLY_G3);
+		}
+		int sw = want < 4096 ? 1 : 2, sh = ry + 1;   /* thinner in its anger */
+		if (ry > 0 && prim + sizeof(POLY_F4) < prim_end) {
+			POLY_F4 *f = (POLY_F4 *)prim;
+			setPolyF4(f);
+			setXY4(f, ix, iy - sh, ix + sw, iy, ix - sw, iy, ix, iy + sh);
+			setRGB0(f, 6, 3, 3);
+			addPrim(si - 1, f);
+			prim += sizeof(POLY_F4);
+		}
 	}
 	sprite(s, 160, 40, 60, 26, FX_GLOW, CLUT_GLOW, 40 + flash / 6, 12, 8, 1, 0);
 	/* The bolt: a jagged line down the side of the sky. */
@@ -553,7 +650,13 @@ static void figure_lights(int wx, int wz, int is_soul, int light) {
 	}
 	fig_col[2][0] = fig_col[2][1] = fig_col[2][2] = 0;
 	fig_dir[2][0] = 0; fig_dir[2][1] = -4096; fig_dir[2][2] = 0;
-	if (best >= 0) {
+	if (is_soul && best < 0) {
+		/* Nothing brighter about: a pale light from behind and above,
+		 * catching the soul's shoulders and hood (a rim on its outline). */
+		fig_dir[2][0] = 0; fig_dir[2][1] = -2600; fig_dir[2][2] = 3200;
+		normalise(fig_dir[2]);
+		fig_col[2][0] = 1500; fig_col[2][1] = 1400; fig_col[2][2] = 1250;
+	} else if (best >= 0) {
 		int k = light_reach(best, wx, wz);
 		fig_dir[2][0] = lit[best].x - wx; fig_dir[2][1] = lit[best].y + 40; fig_dir[2][2] = lit[best].z - wz;
 		normalise(fig_dir[2]);
@@ -743,6 +846,27 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 	load_matrix(&cam);
 }
 
+/* The soul's own light on the stone around it: the glow, added, warm. */
+static void ground_glow(int x, int z, int r, int bright) {
+	Proj p[4];
+	project(x - r, -3, z + r, &p[0]);
+	project(x + r, -3, z + r, &p[1]);
+	project(x - r, -3, z - r, &p[2]);
+	project(x + r, -3, z - r, &p[3]);
+	if (!on_screen(p, 4) || prim + sizeof(POLY_FT4) > prim_end || bright <= 0) return;
+	POLY_FT4 *q = (POLY_FT4 *)prim;
+	setPolyFT4(q);
+	setSemiTrans(q, 1);
+	setXY4(q, p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y, p[3].x, p[3].y);
+	int u = FX_GLOW * 64;
+	setUV4(q, u, 64, u + 63, 64, u, 127, u + 63, 127);
+	setRGB0(q, 110 * bright >> 8, 74 * bright >> 8, 36 * bright >> 8);
+	q->tpage = fig_tpage_add;
+	q->clut = fig_clut[CLUT_GLOW];
+	addPrim(slot(p[0].z) - 1, q);
+	prim += sizeof(POLY_FT4);
+}
+
 /* A soft round shadow under a figure: the glow texture, subtracted. */
 static void shadow(int x, int z, int r) {
 	Proj p[4];
@@ -766,9 +890,22 @@ static void shadow(int x, int z, int r) {
 
 /* ---- The floor ------------------------------------------------------------------- */
 
-static int tele[MAX_N][MAX_N];
 static int32_t fall_at[MAX_N][MAX_N];   /* floor_t when each slab starts to fall */
 static uint8_t crack_t[MAX_N][MAX_N];   /* a heavy blow cracked it: fades */
+static int tired_t;                     /* an action wanted more stamina: flash */
+/* Numbers and words over the fight (damage, "BROKEN"): rising, fading. */
+#define MAX_POPS 8
+static struct { int32_t x, z, t; int16_t v, kind; } pops[MAX_POPS];
+enum { POP_HIT, POP_HEAVY, POP_RIPOSTE, POP_BROKEN };
+static void pop(int tx, int ty, int v, int kind) {
+	int best = 0;
+	for (int i = 1; i < MAX_POPS; i++) if (pops[i].t > pops[best].t) best = i;
+	for (int i = 0; i < MAX_POPS; i++) if (pops[i].t <= 0 || pops[i].t > 60) { best = i; break; }
+	tile_world(tx * 16, ty * 16, &pops[best].x, &pops[best].z);
+	pops[best].t = 1;
+	pops[best].v = v;
+	pops[best].kind = kind;
+}
 static int ticked_frame;                /* the game moved on this frame */
 static void floor_grit(int tx, int ty);
 static void glyph(uint32_t *s, int g, int cx, int cy, int size, int r, int gr, int b, int glow);
@@ -911,6 +1048,37 @@ static void draw_floor(int frame) {
 		}
 }
 
+/* ---- Chains hanging into the void ---------------------------------------------------- */
+
+static void draw_chains(int frame) {
+	/* From far above, ending a little over the floor's level, swaying;
+	 * x, z, where it ends (y), sway phase. */
+	static const int16_t C[4][4] = {
+		{ -1450, 400, -420, 0 }, { 1400, -150, -300, 900 }, { -350, 1550, -560, 1700 },
+		{ 950, 1450, -380, 2600 },
+	};
+	for (int i = 0; i < 4; i++) {
+		Proj a, b;
+		int sway = isin((frame * 9 + C[i][3]) & 4095) * 70 >> 12;
+		int y0 = -2600, y1 = C[i][2];
+		project(C[i][0], y0, C[i][1], &b);
+		for (int k = 0; k < 7; k++) {
+			a = b;
+			project(C[i][0] + sway * (k + 1) * (k + 1) / 49, y0 + (y1 - y0) * (k + 1) / 7, C[i][1], &b);
+			if (a.z <= NEAR_Z || b.z <= NEAR_Z || prim + sizeof(LINE_F2) > prim_end) continue;
+			int c = (k & 1) ? 54 : 40, r = c, g = c - 4, bb = c - 6;   /* links, alternately catching the light */
+			grade(&r, &g, &bb);
+			fogged(&r, &g, &bb, b.z);
+			LINE_F2 *l = (LINE_F2 *)prim;
+			setLineF2(l);
+			setXY2(l, a.x, a.y, b.x, b.y);
+			setRGB0(l, clamp255(r), clamp255(g), clamp255(bb));
+			addPrim(slot(b.z), l);
+			prim += sizeof(LINE_F2);
+		}
+	}
+}
+
 /* ---- Statues in the haze ---------------------------------------------------------- */
 
 static void draw_statues(void) {
@@ -919,7 +1087,9 @@ static void draw_statues(void) {
 	static uint8_t cache[4][160][4][3];
 	static const int16_t AT[4][5] = {   /* x, y, z, yaw, light */
 		{ -3900, 1300, 4200, 1400, 230 }, { 4000, 1100, 3600, 3300, 230 },
-		{ 900, 1000, 6200, 300, 220 }, { -1800, 1100, 6800, 0, 210 },
+		/* Ruins at the floor's edge: pillars sunk in the void, their tops
+		 * just about level with the slabs. */
+		{ -1700, 700, 900, 500, 200 }, { 1600, 620, 1500, 3600, 210 },
 	};
 	const Model *M[4] = { &head_statue, &hand_statue, &pillar_statue, &pillar_statue };
 	static int ready;
@@ -1113,8 +1283,22 @@ static void draw_hud(int frame) {
 	/* The boss's entrance is a scene of its own: no HUD over the letterbox. */
 	if (floor_state == F_BOSS_INTRO) goto scene;
 	panel(6, 5, 148, 25, 1);
+	/* Health: what a blow took stays pale a moment, then drains away. */
+	static int hp_shown = HP_MAX << 8, hp_wait;
+	if (p->hp << 8 > hp_shown || floor_state == F_WAVE_INTRO) hp_shown = p->hp << 8, hp_wait = 0;
+	else if (p->hp << 8 < hp_shown) {
+		if (p->hurt_t < 2) hp_wait = 40;
+		if (hp_wait > 0) { if (ticked_frame) hp_wait--; }
+		else if (ticked_frame) hp_shown -= 96;
+		if (hp_shown < p->hp << 8) hp_shown = p->hp << 8;
+	}
 	bar(11, 9, 100, 7, p->hp, HP_MAX, 200, 36, 30, 0);
+	if (hp_shown >> 8 > p->hp) bar(11, 9, 100, 7, hp_shown >> 8, HP_MAX, 235, 205, 180, 0);
+	/* Stamina: flashes red when an action wanted more than there was. */
+	if (tired_t > 0 && ticked_frame) tired_t--;
+	int tired = tired_t > 0 && (tired_t & 4);
 	bar(11, 19, 100, 6, p->stamina, STAMINA_MAX * 16, 150, 170, 80, 0);
+	if (tired) box2d(0, 11, 19, 100, 6, 160, 30, 24);
 	prim = ui_end();
 	for (int i = 0; i < 3; i++)
 		glyph(ot, G_FLASK, 122 + i * 11, 17, 14, i < p->flasks ? 120 : 30, i < p->flasks ? 200 : 34, i < p->flasks ? 170 : 40, 0);
@@ -1128,6 +1312,23 @@ static void draw_hud(int frame) {
 	if ((floor_state == F_FIGHT || floor_state == F_WAVE_INTRO) && boss < 0) {
 		sprintf(line, "WAVE %s", ROMAN[wave < 3 ? wave : 2]);
 		text(202, 11, line, FONT_SMALL, 170, 160, 150, 1, 0);
+	}
+	/* Damage over the fight, rising and fading; "BROKEN" over a broken husk. */
+	for (int i = 0; i < MAX_POPS && !hud_quiet; i++) {
+		if (pops[i].t <= 0) continue;
+		if (ticked_frame && ++pops[i].t > 50) { pops[i].t = 0; continue; }
+		int t = pops[i].t, k = pops[i].kind;
+		Proj p;
+		project(pops[i].x, -300 - t * 3, pops[i].z, &p);
+		if (p.z <= NEAR_Z) continue;
+		int f = t < 36 ? 256 : (50 - t) * 256 / 14;
+		if (k == POP_BROKEN) {
+			text(p.x, p.y - 12, "BROKEN", FONT_SMALL, 160 * f >> 8, 200 * f >> 8, 255 * f >> 8, 1, 0);
+		} else {
+			sprintf(line, "%d", pops[i].v);
+			int r = 235, g = k == POP_RIPOSTE ? 190 : k == POP_HEAVY ? 170 : 225, b = k == POP_RIPOSTE ? 80 : k == POP_HEAVY ? 110 : 205;
+			text(p.x + (i & 1 ? 10 : -10), p.y, line, k == POP_HIT ? FONT_SMALL : FONT_LARGE, r * f >> 8, g * f >> 8, b * f >> 8, 1, 0);
+		}
 	}
 scene:
 	if (hud_quiet) { prim = ui_end(); return; }
@@ -1296,11 +1497,13 @@ static void handle_events(void) {
 		int s = 0, c = 4096;   /* kicks go away from the camera */
 		switch (e->type) {
 		case EV_HIT:
+			pop(e->x, e->y, e->v, POP_HIT);
 			burst(e->x, e->y, 10, 230, 210, 180, 10, 150);
 			light_tile(e->x, e->y, 220, 200, 170, 20, 12);
 			kick_x += s * 14 >> 12; kick_z += c * 14 >> 12;
 			break;
 		case EV_HEAVY:
+			pop(e->x, e->y, e->v, POP_HEAVY);
 			burst(e->x, e->y, 18, 255, 220, 170, 14, 150);
 			light_tile(e->x, e->y, 255, 220, 160, 30, 24);
 			kick_x += s * 48 >> 12; kick_z += c * 48 >> 12;
@@ -1314,6 +1517,14 @@ static void handle_events(void) {
 					spawn(PK_CHUNK, x + prand(100) - 50, -10, z + prand(100) - 50, prand(13) - 6, -6 - prand(8), prand(13) - 6, 40 + prand(20), 0, 0, 0, 30 + prand(30), 2);
 			}
 			break;
+		case EV_TIRED:
+			tired_t = 24;
+			break;
+		case EV_BROKEN:   /* the husk's guard shatters: pale blue shards */
+			pop(e->x, e->y, 0, POP_BROKEN);
+			burst(e->x, e->y, 16, 150, 190, 255, 12, 180);
+			light_tile(e->x, e->y, 140, 180, 255, 26, 20);
+			break;
 		case EV_SPAWN:   /* ash drawn up out of the slab */
 			burst(e->x, e->y, 16, 140, 130, 120, 6, 40);
 			light_tile(e->x, e->y, 255, 130, 60, 20, 30);
@@ -1324,6 +1535,7 @@ static void handle_events(void) {
 			break;
 
 		case EV_RIPOSTE:
+			pop(e->x, e->y, e->v, POP_RIPOSTE);
 			burst(e->x, e->y, 24, 255, 200, 120, 16, 150);
 			light_tile(e->x, e->y, 255, 200, 120, 36, 30);
 			zoom += 120;
@@ -1387,7 +1599,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 	if (ticked)
 		for (int y = 0; y < MAX_N; y++)
 			for (int x = 0; x < MAX_N; x++) if (crack_t[y][x]) crack_t[y][x]--;
-	if (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 2) memset(crack_t, 0, sizeof(crack_t));
+	if (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 2) { memset(crack_t, 0, sizeof(crack_t)); memset(pops, 0, sizeof(pops)); }
 	ot = ot_;
 	prim = prim_;
 	prim_end = end;
@@ -1422,7 +1634,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		if (death_t < 0) death_t = 0;
 		death_t++;
 		soul_glow = death_t * 3 < 256 ? 256 - death_t * 3 : 0;
-		desat = death_t * 3 < 230 ? death_t * 3 : 230;
+		desat = death_t * 3 < 256 ? death_t * 3 : 256;   /* to black and white */
 		dim = death_t < 70 ? 256 - death_t : 186;
 	} else {
 		death_t = -1;
@@ -1438,19 +1650,32 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 	draw_sky(frame);
 	draw_clouds(frame);
 	draw_statues();
+	draw_chains(frame);
 	draw_floor(frame);
 
-	/* Absolution where you fell: a flame floating over the slab. */
+	/* Absolution where you fell: a flame floating over the slab. Judged,
+	 * that one gutters out (it's lost), and a new one, the only colour
+	 * left, marks where what you carried will wait. */
+	int dead = floor_state == F_DEAD;
 	if (drop_amount > 0) {
 		int x, z;
 		tile_world(drop_x * 16, drop_y * 16, &x, &z);
 		Proj p;
 		project(x, -70 + (isin((frame * 60) & 4095) >> 9), z, &p);
-		if (p.z > NEAR_Z) {
-			int sz = 90 * SCREEN_H / p.z;
-			glyph(slot(p.z) - 1, G_FLAME, p.x, p.y, sz, 255, 200, 90, 1);
-			if (frame & 1) spawn(PK_GLOW, x + prand(40) - 20, -60, z + prand(40) - 20, 0, -2, 0, 20, 255, 170, 70, 8, 0);
+		if (p.z > NEAR_Z && !(dead && death_t > 60)) {
+			int sz = 90 * SCREEN_H / p.z, k = dead ? 256 - death_t * 4 : 256;
+			glyph(slot(p.z) - 1, G_FLAME, p.x, p.y, sz * (dead ? k : 256) >> 8, 255 * k >> 8, 200 * k >> 8, 90 * k >> 8, 1);
+			if ((frame & 1) && !dead) spawn(PK_GLOW, x + prand(40) - 20, -60, z + prand(40) - 20, 0, -2, 0, 20, 255, 170, 70, 8, 0);
 		}
+	}
+	if (dead && absolution > 0 && death_t > 40) {
+		int x, z, tx, ty;
+		game_death_tile(&tx, &ty);
+		tile_world(tx * 16, ty * 16, &x, &z);
+		Proj p;
+		project(x, -70 + (isin((frame * 60) & 4095) >> 9), z, &p);
+		int k = death_t > 100 ? 256 : (death_t - 40) * 256 / 60;
+		if (p.z > NEAR_Z) glyph(slot(p.z) - 1, G_FLAME, p.x, p.y, 110 * SCREEN_H / p.z, 255 * k >> 8, 190 * k >> 8, 70 * k >> 8, 1);
 	}
 
 	/* The husks. */
@@ -1550,7 +1775,10 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		if (!gone) draw_model(&soul_model, &ps, soul_x, drop, soul_z, player.facing * 1024, dodge_glow ? 300 : 256, tint, drop ? (drop < 1200 ? 256 - drop / 6 : 56) : 256, 1);
 		model_glow = 256;
 		/* Off the ground: the shadow shrinks under it. */
-		if (!gone && player.state != P_FALL) shadow(soul_x, soul_z, 80 + (ps.dy < 0 ? ps.dy / 4 : 0));
+		if (!gone && player.state != P_FALL) {
+			shadow(soul_x, soul_z, 80 + (ps.dy < 0 ? ps.dy / 4 : 0));
+			ground_glow(soul_x, soul_z, 210, soul_glow + (isin((game_frames * 60) & 4095) >> 9));   /* a candle's flicker */
+		}
 		/* The sword's arc as it strikes. */
 		int strike = 8;   /* light and heavy both land on frame 8 */
 		if (player.state == P_ATTACK && player.t >= strike && player.t < strike + 5) {

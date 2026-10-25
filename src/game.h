@@ -98,9 +98,10 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL, EV_FALL, EV_CRUMBLE, EV_PERFECT, EV_SPAWN, EV_LOCK };   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL, EV_FALL, EV_CRUMBLE, EV_PERFECT, EV_SPAWN, EV_LOCK, EV_BROKEN, EV_TIRED };   /* hits: v = the damage */   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
 typedef struct {
 	int16_t type, x, y;   /* tile */
+	int16_t v;            /* a hit's damage */
 } GameEvent;
 #define MAX_EVENTS 16
 extern GameEvent game_events[MAX_EVENTS];
@@ -135,5 +136,7 @@ int game_telegraph(int x, int y);
 int game_slab(int x, int y);
 /* The last death was a fall (nothing left to draw of the soul). */
 int game_fell(void);
+/* Where the soul's absolution will wait if it rises now. */
+void game_death_tile(int *x, int *y);
 /* The tile the soul is on now (passing over others while it dodges). */
 void game_player_tile(int *x, int *y);

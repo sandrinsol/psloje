@@ -137,9 +137,10 @@ static void plate(int x0, int x1, int y0, int y1, int z, const uint8_t *c, int g
 }
 
 void models_init(void) {
-	/* The soul: a hooded figure in a ragged grey robe, faint light in its
-	 * face, a sword in the right hand. About 180 units tall. */
-	static const uint8_t robe[] = { 150, 144, 140 }, robe2[] = { 172, 164, 156 }, hood[] = { 128, 122, 122 };
+	/* The soul: a hooded figure in a ragged robe of old ivory (it stands out
+	 * on the grey stone), faint light in its face, a sword in the right
+	 * hand. About 180 units tall. */
+	static const uint8_t robe[] = { 196, 184, 158 }, robe2[] = { 214, 202, 176 }, hood[] = { 168, 156, 134 };
 	static const uint8_t dark[] = { 8, 6, 10 }, eyes[] = { 170, 200, 255 }, skin[] = { 120, 110, 104 };
 	static const uint8_t blade[] = { 200, 206, 214 }, hilt[] = { 130, 96, 52 };
 	Model *m = &soul_model;
