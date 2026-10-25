@@ -58,7 +58,7 @@ typedef struct {
 } DLight;
 static DLight dlights[MAX_LIGHTS];
 /* This frame's lights, their colour already faded by age. */
-static struct { int x, y, z, r, g, b, r2; } lit[MAX_LIGHTS + 1];
+static struct { int x, y, z, r, g, b, r2; } lit[MAX_LIGHTS + 2];
 static int nlit;
 
 static int flash;             /* lightning, 0..255 */
@@ -456,6 +456,15 @@ static void gather_lights(int ticked) {
 		lit[nlit].r2 = l->radius * l->radius;
 		nlit++;
 		if (ticked) l->life--;
+	}
+	/* A charging blow glows on the sword, brighter as it fills. */
+	if (player.state == P_CHARGE) {
+		int k = player.t >= CHARGE_FULL ? 256 : player.t * 200 / CHARGE_FULL;
+		if (player.t >= CHARGE_FULL) k += isin((game_frames * 400) & 4095) >> 7;
+		lit[nlit].x = soul_x; lit[nlit].y = -200; lit[nlit].z = soul_z;
+		lit[nlit].r = 255 * k >> 8; lit[nlit].g = 200 * k >> 8; lit[nlit].b = 110 * k >> 8;
+		lit[nlit].r2 = 20 * 20;
+		nlit++;
 	}
 	if (drop_amount > 0) {
 		int x, z, f = 200 + (isin((game_frames * 300) & 4095) >> 7);
@@ -1089,7 +1098,22 @@ static void soul_pose(Pose *ps) {
 	int breathe = isin((game_frames * 40) & 4095) >> 10;
 	ps->dy = breathe;
 	switch (p->state) {
+	case P_CHARGE: {
+		/* The sword drawn back over the shoulder; shaking once it's ready. */
+		ps->pitch[SOUL_SWORD_ARM] = lerp(380, -2300, p->t, CHARGE_FULL);
+		ps->yaw[SOUL_SWORD_ARM] = lerp(-120, -500, p->t, CHARGE_FULL);
+		ps->lean = lerp(0, -200, p->t, CHARGE_FULL);
+		ps->dy = lerp(0, 10, p->t, CHARGE_FULL);
+		if (p->t >= CHARGE_FULL && (game_frames & 2)) ps->pitch[SOUL_SWORD_ARM] += 60;
+		break;
+	}
 	case P_ATTACK:
+		if (p->heavy) {
+			/* From over the shoulder, all the way down. */
+			if (p->t < 6) { ps->pitch[SOUL_SWORD_ARM] = lerp(-2300, 1700, p->t - 3, 3); ps->yaw[SOUL_SWORD_ARM] = lerp(-500, 300, p->t - 3, 3); ps->lean = lerp(-200, 400, p->t - 3, 3); }
+			else { ps->pitch[SOUL_SWORD_ARM] = lerp(1700, 380, p->t - 12, 16); ps->lean = lerp(400, 0, p->t - 12, 16); ps->dy = lerp(14, 0, p->t - 6, 10); }
+			break;
+		}
 		if (p->t < 8) { ps->pitch[SOUL_SWORD_ARM] = lerp(380, -1500, p->t, 6); ps->lean = lerp(0, -120, p->t, 6); }
 		else { ps->pitch[SOUL_SWORD_ARM] = lerp(-1500, 1300, p->t - 8, 3); ps->yaw[SOUL_SWORD_ARM] = lerp(-300, 300, p->t - 8, 4); ps->lean = lerp(-120, 220, p->t - 8, 3); }
 		if (p->t > 14) { ps->pitch[SOUL_SWORD_ARM] = lerp(1300, 380, p->t - 14, 8); ps->lean = lerp(220, 0, p->t - 14, 8); }
@@ -1105,14 +1129,20 @@ static void soul_pose(Pose *ps) {
 	case P_DRINK:
 		ps->pitch[SOUL_ARM] = lerp(120, 2300, p->t, 12);
 		break;
-	case P_STAGGER:
-		ps->lean = -300 + ((game_frames & 4) ? 60 : 0);
+	case P_JUMP: {
+		/* Crouch, up, down, crouch. */
+		int air = AIR_LAST - AIR_FIRST + 1, t = p->t - AIR_FIRST;
+		if (t < 0 || t >= air) ps->dy = 14;
+		else ps->dy = -(150 * isin(t * 2048 / air) >> 12);
+		ps->pitch[SOUL_ARM] = t >= 0 && t < air ? -600 : 300;
+		ps->pitch[SOUL_SWORD_ARM] = t >= 0 && t < air ? -300 : 380;
+		ps->lean = t >= 0 && t < air ? -80 : 120;
 		break;
+	}
 	case P_DEAD:
 		ps->lean = lerp(0, 1000, p->t, 30); ps->dy = lerp(0, 30, p->t, 30);
 		break;
 	}
-	if (p->blocking) { ps->pitch[SOUL_SWORD_ARM] = 1100; ps->yaw[SOUL_SWORD_ARM] = -700; ps->lean = -60; }
 }
 
 static void husk_pose(const Enemy *e, Pose *ps) {
@@ -1160,7 +1190,6 @@ static void husk_pose(const Enemy *e, Pose *ps) {
 static int enemy_yaw[MAX_ENEMIES];
 
 static void handle_events(void) {
-	static const int8_t DX[4] = { 0, 1, 0, -1 }, DY[4] = { -1, 0, 1, 0 };
 	for (int i = 0; i < num_events; i++) {
 		const GameEvent *e = &game_events[i];
 		int s = 0, c = 4096;   /* kicks go away from the camera */
@@ -1170,28 +1199,32 @@ static void handle_events(void) {
 			light_tile(e->x, e->y, 220, 200, 170, 20, 12);
 			kick_x += s * 14 >> 12; kick_z += c * 14 >> 12;
 			break;
-		case EV_RIPOSTE:
+		case EV_HEAVY:
 			burst(e->x, e->y, 18, 255, 220, 170, 14, 150);
 			light_tile(e->x, e->y, 255, 220, 160, 30, 24);
 			kick_x += s * 30 >> 12; kick_z += c * 30 >> 12;
 			zoom += 90;
 			break;
+		case EV_RIPOSTE:
+			burst(e->x, e->y, 24, 255, 200, 120, 16, 150);
+			light_tile(e->x, e->y, 255, 200, 120, 36, 30);
+			zoom += 120;
+			break;
 		case EV_KILL:
 			shatter(e->x, e->y);
 			light_tile(e->x, e->y, 255, 120, 40, 28, 40);
 			break;
-		case EV_PARRY:
-			burst(player.x + DX[player.facing], player.y + DY[player.facing], 16, 255, 230, 140, 16, 140);
-			light_tile(player.x + DX[player.facing], player.y + DY[player.facing], 255, 210, 110, 36, 26);
-			zoom += 70;
+		case EV_CHARGED:
+			burst(player.x, player.y, 12, 255, 220, 130, 8, 230);
+			light_tile(player.x, player.y, 255, 210, 110, 24, 18);
+			break;
+		case EV_JUMP:
+		case EV_LAND:
+			burst(e->x, e->y, 6, 150, 140, 130, 6, 0);
 			break;
 		case EV_HURT:
 			burst(e->x, e->y, 12, 220, 40, 30, 9, 120);
 			light_tile(e->x, e->y, 230, 40, 30, 22, 16);
-			break;
-		case EV_BLOCK:
-			burst(e->x, e->y, 6, 230, 220, 190, 10, 130);
-			light_tile(e->x, e->y, 200, 190, 160, 16, 8);
 			break;
 		case EV_SLAM:
 			burst(e->x, e->y, 14, 150, 120, 90, 12, 10);
@@ -1306,15 +1339,17 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		model_glow = soul_glow;
 		draw_model(&soul_model, &ps, soul_x, 0, soul_z, player.facing * 1024, dodge_glow ? 300 : 256, tint, 256, 1);
 		model_glow = 256;
-		shadow(soul_x, soul_z, 80);
+		/* Off the ground: the shadow shrinks under it. */
+		shadow(soul_x, soul_z, 80 + (ps.dy < 0 ? ps.dy / 4 : 0));
 		/* The sword's arc as it strikes. */
-		if (player.state == P_ATTACK && player.t >= 8 && player.t < 13) {
+		int strike = player.heavy ? 6 : 8;
+		if (player.state == P_ATTACK && player.t >= strike && player.t < strike + 5) {
 			static const int8_t DX[4] = { 0, 1, 0, -1 }, DY[4] = { -1, 0, 1, 0 };
 			int ax, az;
 			tile_world((player.x + DX[player.facing]) * 16, (player.y + DY[player.facing]) * 16, &ax, &az);
 			Proj p;
 			project((soul_x + ax) / 2, -110, (soul_z + az) / 2, &p);
-			if (p.z > NEAR_Z) glyph(slot(p.z) - 2, G_SLASH, p.x, p.y, 200 * SCREEN_H / p.z, 255, 255, 255, 1);
+			if (p.z > NEAR_Z) glyph(slot(p.z) - 2, G_SLASH, p.x, p.y, (player.heavy ? 300 : 200) * SCREEN_H / p.z, 255, player.heavy ? 220 : 255, player.heavy ? 150 : 255, 1);
 		}
 	}
 

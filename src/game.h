@@ -3,9 +3,12 @@
  *
  * The floor is an empty N x N grid (x right, y down = towards the start,
  * 0..N-1; facing 0 = up the grid). The D-pad walks a tile at a time;
- * Circle (+ a direction) dodges, with invincible frames, for stamina. The
- * soul always faces the nearest enemy along a row or column. Enemies light
- * up the tiles they're about to hit: faint first, bright just before.
+ * Circle (+ a direction) dodges, with invincible frames, for stamina; Cross
+ * jumps in place, over the blows that hit the ground; Square attacks, held
+ * it charges a heavy blow, which breaks a husk (staggers it): the next hit on
+ * a broken husk is a riposte, triple damage. The soul always faces the nearest enemy along a
+ * row or column. Enemies light up the tiles they're about to hit: faint
+ * first, bright just before.
  */
 #pragma once
 #include <stdint.h>
@@ -17,7 +20,7 @@
 enum { DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT };
 
 /* Player states. */
-enum { P_IDLE, P_DODGE, P_ATTACK, P_DRINK, P_STAGGER, P_DEAD, P_WALK };
+enum { P_IDLE, P_DODGE, P_ATTACK, P_DRINK, P_CHARGE, P_DEAD, P_WALK, P_JUMP };
 
 /* Pad input for one frame. */
 typedef struct {
@@ -32,11 +35,9 @@ typedef struct {
 	int32_t hp, stamina;    /* 0..HP_MAX, 0..STAMINA_MAX * 16 */
 	int32_t stamina_wait;   /* frames before stamina refills */
 	int32_t flasks;
-	int32_t blocking;
-	int32_t parry_t;        /* frames since Square was pressed (parry window) */
+	int32_t heavy;          /* this swing is a charged, heavy one */
 	int32_t hurt_t;         /* frames since last hit (flash) */
-	int32_t parried_t;      /* frames since the last successful parry */
-	int32_t buffered, buffer_t; /* a dodge/attack pressed while busy */
+	int32_t buffered, buffer_t; /* a dodge/attack/jump pressed while busy */
 	int32_t buffer_dir;
 	int32_t dodge_dir;
 } Player;
@@ -55,6 +56,13 @@ typedef struct {
 
 /* A walking step, one tile (a dodge is 9 frames). */
 #define WALK_FRAMES   20
+/* A jump: off the ground (attacks on the floor miss) from AIR_FIRST to
+ * AIR_LAST. */
+#define JUMP_FRAMES   28
+#define AIR_FIRST     3
+#define AIR_LAST      21
+/* Square held this long: the heavy blow is ready. */
+#define CHARGE_FULL   30
 
 #define HP_MAX        100
 #define STAMINA_MAX   100
@@ -69,11 +77,10 @@ extern const char *message;
 extern int32_t shake_t;
 extern int32_t hitstop_t;   /* frames the game stays frozen (hit-stop) */
 extern int32_t floor_t;     /* frames in the floor's current state */
-extern int32_t parry_wide;  /* assist: a wider parry window */
 
 /* What happened this frame, for sounds and effects. */
-enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_RIPOSTE, EV_KILL, EV_BLOCK, EV_PARRY, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR };
+enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE };
 typedef struct {
 	int16_t type, x, y;   /* tile */
 } GameEvent;
