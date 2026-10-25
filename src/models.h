@@ -9,7 +9,7 @@
 #pragma once
 #include <stdint.h>
 
-#define MAX_PARTS 4
+#define MAX_PARTS 5
 
 typedef struct {
 	int16_t x, y, z;
@@ -48,7 +48,7 @@ typedef struct {
 } Pose;
 
 enum { SOUL_BODY, SOUL_HEAD, SOUL_SWORD_ARM, SOUL_ARM };
-enum { HUSK_BODY, HUSK_HEAD, HUSK_RIGHT_ARM, HUSK_LEFT_ARM };
+enum { HUSK_BODY, HUSK_HEAD, HUSK_RIGHT_ARM, HUSK_LEFT_ARM, HUSK_LEGS };
 
 extern Model soul_model, husk_model, head_statue, hand_statue, pillar_statue;
 

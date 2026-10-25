@@ -175,9 +175,7 @@ void models_init(void) {
 	m = &husk_model;
 	scale = 6554;   /* x 1.6 */
 	mat = MAT_ASH;
-	begin(m, 0, -90, 0, -1);   /* legs and trunk, bending at the hips */
-	box(-46, -14, -92, 0, -22, 20, ash2);
-	box(14, 46, -92, 0, -22, 20, ash2);
+	begin(m, 0, -90, 0, -1);   /* the trunk, bending at the hips */
 	box(-62, 62, -206, -88, -52, 48, ash);
 	begin(m, 0, -190, 36, HUSK_BODY);   /* the head, sunk in front of the shoulders */
 	box(-24, 24, -218, -176, 34, 80, ash3);
@@ -189,6 +187,9 @@ void models_init(void) {
 	begin(m, -66, -196, 0, HUSK_BODY);  /* left arm */
 	box(-90, -60, -200, -40, -18, 18, ash);
 	box(-96, -56, -44, -6, -26, 26, ash2);
+	begin(m, 0, 0, 0, -1);   /* the legs: they stay planted */
+	box(-46, -14, -92, 0, -22, 20, ash2);
+	box(14, 46, -92, 0, -22, 20, ash2);
 
 	/* Sunken statues in the ash around the floor: a giant head, a raised
 	 * hand, a broken column (units: about 4x the figures). */

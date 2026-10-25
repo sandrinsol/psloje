@@ -5,7 +5,8 @@
  * body's.
  *
  * Soul parts: body, head (hood), sword arm, other arm.
- * Husk parts: body, head, right arm, left arm.
+ * Husk parts: body, head, right arm, left arm (and the legs, which keep
+ * still).
  */
 #include <stdint.h>
 #include "anim.h"
