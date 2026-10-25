@@ -56,6 +56,8 @@
     {"wait": 20},
     {"assertRam": "player+28", "as": "s32", "equals": 70},
     {"assertRam": "player+4", "as": "s32", "equals": 6},
+    {"name": "the blow spilled the soul's ink where it stood", "assertRam": "player+112", "as": "s32", "equals": 4},
+    {"assertRam": "player+116", "as": "s32", "equals": 5},
 
     {"wait": 60},
     {"name": "Circle pressed twice, quickly: one dodge, not two (no running off the edge)", "write": "enemies", "hex": "00000000"},
@@ -67,6 +69,24 @@
     {"tap": ["RIGHT", "CIRCLE"], "hold": 2, "release": 0},
     {"wait": 40},
     {"assertRam": "player", "as": "s32", "equals": 6},
-    {"assertRam": "player+20", "as": "s32", "equals": 0}
+    {"assertRam": "player+20", "as": "s32", "equals": 0},
+
+    {"name": "ink spilled a tile up, still wet: stepping back onto it takes it all back", "write": "player+28", "value": 70, "as": "s32"},
+    {"write": "player+92", "hex": "1e000000 c8000000"},
+    {"write": "player+112", "hex": "06000000 03000000 00000000"},
+    {"wait": 2},
+    {"tap": "UP"},
+    {"wait": 40},
+    {"assertRam": "player+4", "as": "s32", "equals": 3},
+    {"assertRam": "player+28", "as": "s32", "equals": 100},
+    {"assertRam": "player+92", "as": "s32", "equals": 0},
+    {"name": "dried up: nothing to take back", "write": "player+28", "value": 70, "as": "s32"},
+    {"write": "player+92", "hex": "1e000000 01000000"},
+    {"write": "player+112", "hex": "06000000 04000000 01000000"},
+    {"wait": 2},
+    {"tap": "DOWN"},
+    {"wait": 40},
+    {"assertRam": "player+4", "as": "s32", "equals": 4},
+    {"assertRam": "player+28", "as": "s32", "equals": 70}
   ]
 }

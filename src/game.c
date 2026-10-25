@@ -349,6 +349,11 @@ static void player_hit(int ex, int ey, int damage, int push) {
 	player.rally += damage;
 	if (player.rally > HP_MAX) player.rally = HP_MAX;
 	player.rally_t = RALLY_FRAMES;
+	/* The soul is ink: the blow spills it where it stood (pushed off, it
+	 * has to come back for it). */
+	player.ink_x = px;
+	player.ink_y = py;
+	player.ink_ready = 0;
 	shake_t = 10;
 	hitstop(5);
 	emit(EV_HURT, px, py);
@@ -559,6 +564,20 @@ static void update_player(const Input *in) {
 	if (p->dodge_wait > 0) p->dodge_wait--;
 	if (p->counter_t > 0) p->counter_t--;
 	if (p->rally_t > 0 && --p->rally_t == 0) p->rally = 0;
+	/* Back on the spilled ink while it's wet (not mid-air, mid-roll): all
+	 * of what's left of it soaks back in. */
+	if (p->rally > 0 && p->state != P_DEAD && p->state != P_FALL) {
+		int tx, ty;
+		player_tile(&tx, &ty);
+		int on = tx == p->ink_x && ty == p->ink_y && p->state != P_JUMP && p->state != P_DODGE;
+		if (!on && !(tx == p->ink_x && ty == p->ink_y)) p->ink_ready = 1;
+		else if (on && p->ink_ready) {
+			p->hp = p->hp + p->rally > HP_MAX ? HP_MAX : p->hp + p->rally;
+			emit(EV_INK, p->ink_x, p->ink_y);
+			p->rally = 0;
+			p->rally_t = 0;
+		}
+	}
 	if (p->state == P_DEAD)
 		return;
 	if (p->state == P_FALL) {

@@ -96,6 +96,8 @@ static void init(void) {
 	SetDispMask(1);
 }
 
+static int cam_turn;   /* the right stick flicked: -1 left, 1 right */
+
 static void read_pad(uint16_t *now_out, uint16_t *pressed_out) {
 	pad_poll(pad_buffers[0]);
 	PADTYPE *pad = (PADTYPE *)pad_buffers[0];
@@ -111,9 +113,28 @@ static void read_pad(uint16_t *now_out, uint16_t *pressed_out) {
 			else now |= y > 0 ? PAD_DOWN : PAD_UP;
 		}
 	}
+	/* The right stick turns the camera a quarter (a flick; back to the
+	 * middle before the next). */
+	static int flicked;
+	cam_turn = 0;
+	if (pad->stat == 0 && pad->type == 0x7) {
+		int x = pad->rs_x - 128;
+		if (!flicked && (x > 80 || x < -80)) { cam_turn = x > 0 ? 1 : -1; flicked = 1; }
+		if (x < 40 && x > -40) flicked = 0;
+	}
 	*pressed_out = now & ~held;
 	*now_out = now;
 	held = now;
+}
+
+/* The D-pad walks the way the camera looks: Up is away from it. A
+ * direction held keeps the quarter it began in (the camera turning
+ * mid-walk doesn't bend the walk). */
+static uint16_t turn_dirs(uint16_t b, int q) {
+	static const uint16_t D[4] = { PAD_UP, PAD_RIGHT, PAD_DOWN, PAD_LEFT };
+	uint16_t out = b & ~(PAD_UP | PAD_RIGHT | PAD_DOWN | PAD_LEFT);
+	for (int i = 0; i < 4; i++) if (b & D[i]) out |= D[(i + q) & 3];
+	return out;
 }
 
 /* ---- Screens ------------------------------------------------------------------------------ */
@@ -277,7 +298,17 @@ static void update(uint16_t now, uint16_t pressed) {
 		carried |= pressed;
 		return;
 	}
-	Input in = { settings_map(now), settings_map(pressed | carried) };
+	/* The camera: the right stick turns it, L2 (if no action is on it)
+	 * puts it behind the soul. */
+	if (cam_turn) draw_turn_camera(cam_turn);
+	if (pressed & PAD_L2) {
+		int free = 1;
+		for (int i = 0; i < NUM_ACTIONS; i++) if (settings.keys[i] == PAD_L2) free = 0;
+		if (free) draw_turn_camera(9);
+	}
+	static int walk_q;
+	if (!(now & (PAD_UP | PAD_RIGHT | PAD_DOWN | PAD_LEFT))) walk_q = draw_camera_quarter();
+	Input in = { settings_map(turn_dirs(now, walk_q)), settings_map(turn_dirs(pressed | carried, walk_q)) };
 	carried = 0;
 	game_update(&in);
 	ticked = 1;

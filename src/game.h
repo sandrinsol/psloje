@@ -48,8 +48,10 @@ typedef struct {
 	int32_t counter_t;      /* after a perfect dodge: the next blow is a riposte */
 	int32_t push_frames;    /* how long this push or drag lasts */
 	int32_t dodge_wait;     /* frames after a dodge before the next can start */
+	int32_t ink_x, ink_y;   /* where the last blow spilled the soul's ink */
+	int32_t ink_ready;      /* stepped off it: stepping back on takes the rest back */
 } Player;
-#define RALLY_FRAMES  180
+#define RALLY_FRAMES  240
 
 /* Enemy states. */
 enum { E_NONE, E_IDLE, E_MOVE, E_WINDUP, E_RECOVER, E_STAGGER, E_DYING, E_SLEEP, E_WAKE, E_RISE };
@@ -117,7 +119,7 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL, EV_FALL, EV_CRUMBLE, EV_PERFECT, EV_SPAWN, EV_LOCK, EV_BROKEN, EV_TIRED, EV_FINISHER, EV_BACKSTAB, EV_GRAB, EV_RALLY };   /* hits: v = the damage */   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL, EV_FALL, EV_CRUMBLE, EV_PERFECT, EV_SPAWN, EV_LOCK, EV_BROKEN, EV_TIRED, EV_FINISHER, EV_BACKSTAB, EV_GRAB, EV_RALLY, EV_INK };   /* hits: v = the damage */   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
 typedef struct {
 	int16_t type, x, y;   /* tile */
 	int16_t v;            /* a hit's damage */

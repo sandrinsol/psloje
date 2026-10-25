@@ -3,5 +3,5 @@
 #define SLAB_TPAGE_X 704
 #define SLAB_TPAGE_Y 0
 #define SLAB_CLUT_X  0
-#define SLAB_CLUT_Y  481   /* + 0 normal, + 1 warning, + 2 about to land */
+#define SLAB_CLUT_Y  493   /* + 0 normal, + 1 warning, + 2 about to land, + 3 / + 4 further off */
 #define NUM_SLABS    4        /* slab k at u = k * 64 */

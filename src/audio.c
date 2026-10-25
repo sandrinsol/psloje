@@ -57,7 +57,7 @@ void audio_events(void) {
 		[EV_HURT] = SFX_HURT, [EV_DEATH] = SFX_DEATH, [EV_WINDUP] = SFX_WINDUP, [EV_SLAM] = SFX_SLAM,
 		[EV_HEAL] = SFX_HEAL, [EV_RECOVER] = SFX_RECOVER, [EV_CLEAR] = SFX_RECOVER, [EV_RISE] = -1, [EV_TRIAL] = SFX_HEAL, [EV_BOSS] = -1, [EV_BELL] = -1, [EV_WAKE] = SFX_WINDUP,
 		[EV_FALL] = SFX_DODGE, [EV_CRUMBLE] = -1, [EV_PERFECT] = SFX_PARRY, [EV_SPAWN] = -1, [EV_LOCK] = SFX_TURN, [EV_BROKEN] = SFX_BLOCK,
-		[EV_TIRED] = -1, [EV_FINISHER] = SFX_KILL, [EV_BACKSTAB] = SFX_RIPOSTE, [EV_GRAB] = SFX_HURT, [EV_RALLY] = -1,
+		[EV_TIRED] = -1, [EV_FINISHER] = SFX_KILL, [EV_BACKSTAB] = SFX_RIPOSTE, [EV_GRAB] = SFX_HURT, [EV_RALLY] = -1, [EV_INK] = SFX_HEAL,
 	};
 	for (int i = 0; i < num_events; i++) {
 		int t = game_events[i].type;

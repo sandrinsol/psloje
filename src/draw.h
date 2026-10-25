@@ -22,3 +22,8 @@ uint8_t *draw_frame(uint32_t *ot, uint8_t *prim, uint8_t *end, int frame, int ti
 /* Behind the title (640 x 480): the floor, the soul standing under the
  * eye, the camera drifting slowly round; no HUD. */
 uint8_t *draw_title_scene(uint32_t *ot, uint8_t *prim, uint8_t *end, int frame);
+/* The camera behind the soul: turn it by quarters (9: back behind the
+ * soul); which quarter it looks along (0 up the grid, clockwise), for
+ * the D-pad. */
+void draw_turn_camera(int quarters);
+int draw_camera_quarter(void);
