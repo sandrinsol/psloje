@@ -46,7 +46,9 @@ typedef struct {
 enum { E_NONE, E_IDLE, E_MOVE, E_WINDUP, E_RECOVER, E_STAGGER, E_DYING, E_SLEEP, E_WAKE };
 /* Kinds: Sloth's husk; a husk asleep until you come near; the bell-ringer,
  * who keeps to the floor's edge and rings a whole row or column down. */
-enum { K_HUSK, K_SLEEPER, K_BELL };
+enum { K_HUSK, K_SLEEPER, K_BELL, K_UNFINISHED };
+#define BOSS_HP      400
+#define BOSS_INTRO   300   /* frames of the boss's entrance */
 
 typedef struct {
 	int32_t state, t;
@@ -84,7 +86,7 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL };
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS };   /* EV_BOSS: the boss's name is carved */
 typedef struct {
 	int16_t type, x, y;   /* tile */
 } GameEvent;
@@ -93,7 +95,8 @@ extern GameEvent game_events[MAX_EVENTS];
 extern int32_t num_events;
 
 /* Floor states. */
-enum { F_WAVE_INTRO, F_FIGHT, F_CLEARED, F_DEAD };
+enum { F_WAVE_INTRO, F_FIGHT, F_CLEARED, F_DEAD, F_BOSS_INTRO };
+extern int32_t boss;   /* the boss's enemy slot, -1: none (yet) */
 
 void game_start_floor(int keep_drop);
 void game_update(const Input *in);

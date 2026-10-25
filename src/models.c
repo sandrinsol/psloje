@@ -9,11 +9,11 @@
 #include "models.h"
 #include "figtex.h"
 
-Model soul_model, husk_model, bell_model, head_statue, hand_statue, pillar_statue;
+Model soul_model, husk_model, bell_model, unfinished_model, head_statue, hand_statue, pillar_statue;
 
-static Vec3 vpool[1200], npool[1200];
-static MFace fpool[700];
-static int16_t fbase[700];   /* each face's part's first vertex in vpool */
+static Vec3 vpool[2000], npool[2000];
+static MFace fpool[1200];
+static int16_t fbase[1200];   /* each face's part's first vertex in vpool */
 static int nv, nf;
 static Part *part;
 static int scale = 4096;   /* this model's size, 4096 = as written */
@@ -69,7 +69,7 @@ static void face(int a, int b, int c, int d, int r, int g, int bl, int glow) {
 
 /* Vertex normals: the average of the smooth faces around each vertex. */
 static void smooth_normals(void) {
-	static int32_t acc[1200][3];
+	static int32_t acc[2000][3];
 	for (int i = 0; i < nv; i++) acc[i][0] = acc[i][1] = acc[i][2] = 0;
 	for (int fi = 0; fi < nf; fi++) {
 		const MFace *f = &fpool[fi];
@@ -217,6 +217,48 @@ void models_init(void) {
 	begin(m, -18, -142, 0, BELL_BODY);  /* the other arm */
 	mat = MAT_ROBE;
 	box(-24, -14, -144, -88, -6, 6, shroud);
+
+	/* The Unfinished: a hollow giant of half-made things. A scaffold for a
+	 * body (posts and a few rungs, never closed), a cracked bell for a head,
+	 * one arm a rope spliced and left frayed, the other bare beams. Parts in
+	 * the husk's order. About 2.3 tiles tall. */
+	static const uint8_t timber[] = { 120, 100, 84 }, timber2[] = { 96, 80, 70 }, rope[] = { 160, 140, 104 };
+	static const uint8_t crack[] = { 10, 6, 4 }, fire[] = { 255, 150, 60 }, letter[] = { 200, 190, 170 };
+	m = &unfinished_model;
+	scale = 11000;   /* x 2.7 */
+	begin(m, 0, -90, 0, -1);   /* the scaffold of a body */
+	mat = MAT_STONE;
+	for (int i = 0; i < 4; i++) {   /* four posts, leaning in */
+		int sx = i & 1 ? 1 : -1, sz = i & 2 ? 1 : -1;
+		box(sx * 46 - 6, sx * 46 + 6, -210, -90, sz * 30 - 6, sz * 30 + 6, timber);
+	}
+	box(-58, 58, -214, -200, -40, 40, timber2);   /* the shoulders: the one rung finished */
+	box(-52, 0, -150, -140, 26, 36, timber2);     /* half a rung in front */
+	box(10, 52, -120, -112, -36, -26, timber2);   /* and half a rung behind */
+	mat = MAT_FLAT;
+	plate(-30, -6, -186, -170, 37, letter, 0);    /* a letter, never sent, nailed in front */
+	begin(m, 0, -214, 10, HUSK_BODY);   /* the head: a cracked bell */
+	mat = MAT_METAL;
+	prism(8, 0, 10, 30, 14, -212, -262, bronze, 1, 1);
+	mat = MAT_FLAT;
+	plate(-3, 3, -262, -218, 42, crack, 0);       /* the crack down its face */
+	plate(-16, -8, -244, -238, 41, fire, 1);
+	plate(8, 16, -244, -238, 41, fire, 1);
+	begin(m, 60, -206, 0, HUSK_BODY);   /* the rope arm, frayed at the end */
+	mat = MAT_ROBE;
+	for (int i = 0; i < 5; i++) box(56 - (i & 1) * 2, 66 + (i & 1) * 2, -206 + i * 30, -178 + i * 30, -6, 6, rope);
+	box(52, 58, -60, -20, -4, 4, rope);   /* strands coming loose */
+	box(64, 70, -60, -30, -3, 3, rope);
+	box(58, 62, -60, -10, 2, 6, rope);
+	begin(m, -60, -206, 0, HUSK_BODY);  /* the other arm: bare beams, never fleshed out */
+	mat = MAT_STONE;
+	box(-66, -56, -206, -120, -6, 6, timber);
+	box(-70, -52, -124, -110, -10, 10, timber2);
+	box(-64, -58, -110, -40, -4, 4, timber);
+	box(-72, -50, -44, -30, -8, 8, timber2);
+	begin(m, 0, 0, 0, -1);   /* legs: two posts in the ash */
+	box(-42, -26, -92, 0, -10, 10, timber);
+	box(26, 42, -92, 0, -10, 10, timber);
 
 	/* Sunken statues in the ash around the floor: a giant head, a raised
 	 * hand, a broken column (units: about 4x the figures). */

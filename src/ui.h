@@ -71,3 +71,8 @@ int menu_update(uint16_t held, uint16_t pressed);
 void menu_draw(int frame);
 /* The title screen's backdrop (sky, ash, logo). */
 void title_draw(int frame, int show_logo);
+
+/* The story (640 x 480): the opening lines, and a memory after its boss.
+ * t: frames since shown. Return 1 once all of it is written. */
+int opening_draw(int t);
+int memory_draw(int t, int guilt);

@@ -254,9 +254,20 @@ static void update_camera(int frame) {
 		int k = 150 - floor_t;
 		dist += 1600 * k / 150 * k / 150;
 	}
-	cam_x = kick_x;
+	/* The boss's entrance: the camera swings in close to where it rises,
+	 * round to one side, and back. */
+	int pan_x = 0, look_z = CAM_LOOK_Z;
+	if (floor_state == F_BOSS_INTRO && boss >= 0) {
+		int t = floor_t > BOSS_INTRO ? BOSS_INTRO : floor_t, k = isin(t * 2048 / BOSS_INTRO);   /* 0 .. 1 .. 0 */
+		int bx, bz;
+		tile_world(enemies[boss].x * 16, enemies[boss].y * 16, &bx, &bz);
+		dist -= 650 * k >> 12;
+		pan_x = (bx * k >> 12) + (isin(t * 4096 / BOSS_INTRO) * 220 >> 12);
+		look_z += (bz + 420 - CAM_LOOK_Z) * k >> 12;   /* aim up at it: it's tall */
+	}
+	cam_x = kick_x + pan_x;
 	cam_y = -(dist * sp >> 12);
-	cam_z = CAM_LOOK_Z - (dist * cp >> 12) + kick_z;
+	cam_z = look_z - (dist * cp >> 12) + kick_z;
 	if (shake_t > 0) {
 		cam_x += (frame & 1) ? shake_t * 2 : -shake_t * 2;
 		cam_y += (frame & 2) ? shake_t : -shake_t;
@@ -1075,9 +1086,32 @@ static void draw_hud(int frame) {
 	panel(250, 5, 64, 25, 1);
 	sprintf(line, "%d", absolution);
 	text(306, 10, line, FONT_SMALL, 230, 205, 150, 2, 0);
-	if (floor_state == F_FIGHT || floor_state == F_WAVE_INTRO) {
+	if ((floor_state == F_FIGHT || floor_state == F_WAVE_INTRO) && boss < 0) {
 		sprintf(line, "WAVE %s", ROMAN[wave < 3 ? wave : 2]);
 		text(202, 11, line, FONT_SMALL, 170, 160, 150, 1, 0);
+	}
+	/* The boss: letterbox bars and its name carved, then its life along
+	 * the bottom. */
+	if (floor_state == F_BOSS_INTRO) {
+		int t = floor_t, lb = t < 30 ? t * 256 / 30 : t > BOSS_INTRO - 30 ? (BOSS_INTRO - t) * 256 / 30 : 256;
+		letterbox(lb < 0 ? 0 : lb);
+		if (t >= 160) {
+			static const char NAME[] = "THE UNFINISHED";
+			char shown[sizeof(NAME)];
+			int n = (t - 160) / 5;
+			if (n > (int)sizeof(NAME) - 1) n = sizeof(NAME) - 1;
+			for (int i = 0; i < n; i++) shown[i] = NAME[i];
+			shown[n] = 0;
+			int fade = t > BOSS_INTRO - 40 ? (BOSS_INTRO - t) * 6 : 240;
+			dark_box(0, 166, 320, 36, fade / 2, 2);
+			text(160 - text_width(NAME, FONT_LARGE) / 2, 170, shown, FONT_LARGE, fade, fade * 3 / 4, fade / 2, 0, 0);
+		}
+	}
+	if (boss >= 0 && floor_state == F_FIGHT) {
+		const Enemy *b = &enemies[boss];
+		panel(30, 206, 260, 28, 1);
+		text(160, 208, "THE UNFINISHED", FONT_SMALL, 220, 190, 150, 1, 0);
+		bar(40, 224, 240, 5, b->hp > 0 ? b->hp : 0, BOSS_HP, 190, 60, 40, 0);
 	}
 	if (message && (message_t > 0 || floor_state == F_DEAD || floor_state == F_CLEARED)) {
 		int big = text_width(message, FONT_LARGE) <= 280;
@@ -1173,6 +1207,12 @@ static void husk_pose(int i, Pose *ps) {
 		}
 		return;
 	}
+	if (e->kind == K_UNFINISHED && e->state == E_SLEEP) {
+		/* Its entrance: risen bent over, then rearing up as its name is carved. */
+		int t = floor_t - 120;
+		animate(an, E_SLEEP, A_HUSK_WAKE, t < 0 ? 0 : t, 120, 0, ps);
+		return;
+	}
 	switch (e->state) {
 	case E_SLEEP:   animate(an, E_SLEEP, A_HUSK_SLEEP, game_frames + phase, 150, 0, ps); break;
 	case E_WAKE:    animate(an, E_WAKE, A_HUSK_WAKE, e->t, 45, 0, ps); break;
@@ -1216,6 +1256,11 @@ static void handle_events(void) {
 			break;
 		case EV_KILL:
 			shatter(e->x, e->y);
+			if (boss >= 0 && enemies[boss].x == e->x && enemies[boss].y == e->y) {
+				shatter(e->x, e->y);   /* the giant comes apart */
+				burst(e->x, e->y, 30, 255, 200, 120, 14, 300);
+				zoom += 200;
+			}
 			light_tile(e->x, e->y, 255, 120, 40, 28, 40);
 			break;
 		case EV_CHARGED:
@@ -1235,6 +1280,11 @@ static void handle_events(void) {
 			break;
 		case EV_DEATH:
 			burst(e->x, e->y, 30, 170, 180, 220, 6, 90);
+			break;
+		case EV_BOSS:
+			burst(e->x, e->y, 30, 255, 140, 60, 12, 300);
+			light_tile(e->x, e->y, 255, 140, 60, 40, 60);
+			zoom += 140;
 			break;
 		case EV_WAKE:
 			burst(e->x, e->y, 10, 255, 130, 50, 6, 200);
@@ -1324,7 +1374,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		if (e->state == E_NONE) { enemy_yaw[i] = -1; husk_anim[i].state = -1; continue; }
 		int ex = e->x * 16, ey = e->y * 16;
 		if (e->state == E_MOVE) {
-			int n = e->kind == K_BELL ? 30 : 36;
+			int n = e->kind == K_BELL ? 30 : e->kind == K_UNFINISHED ? 40 : 36;
 			ex = e->from_x * 16 + (e->x - e->from_x) * 16 * e->t / n;
 			ey = e->from_y * 16 + (e->y - e->from_y) * 16 * e->t / n;
 		}
@@ -1346,12 +1396,24 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		model_red = e->x >= 0 && e->x < grid_n && e->y >= 0 && e->y < grid_n ? tele[e->y][e->x] / 3 : 0;
 		/* A sleeper's embers burn low; waking, they flare. */
 		model_glow = e->state == E_SLEEP ? 50 : e->state == E_WAKE ? 256 + 200 * (45 - e->t) / 45 : 256;
-		draw_model(e->kind == K_BELL ? &bell_model : &husk_model, &ps, x, 0, z, enemy_yaw[i], 256, tint, 256, 0);
+		const Model *model = e->kind == K_BELL ? &bell_model : e->kind == K_UNFINISHED ? &unfinished_model : &husk_model;
+		int wy = 0;
+		if (e->kind == K_UNFINISHED && floor_state == F_BOSS_INTRO) {
+			/* Rising out of the ash under the floor, in a column of ash. */
+			int t = floor_t - 40;
+			wy = t <= 0 ? 900 : t >= 130 ? 0 : 900 - 900 * ease256(t * 256 / 130) / 256;
+			if (t > -20 && t < 150 && ticked)
+				for (int k = 0; k < 2; k++)
+					spawn(k ? PK_GLOW : PK_ASH, x + prand(300) - 150, 200 - prand(100), z + prand(300) - 150, prand(5) - 2, -6 - prand(6), prand(5) - 2,
+					      60, k ? 255 : 120, k ? 140 : 116, k ? 60 : 110, 10 + prand(10), 0);
+			model_glow = t < 100 ? 40 : 256;
+		}
+		draw_model(model, &ps, x, wy, z, enemy_yaw[i], 256, tint, 256, 0);
 		model_glow = 256;
-		shadow(x, z, e->kind == K_BELL ? 80 : 110);
-		/* Health over it once hurt. */
+		if (!wy) shadow(x, z, e->kind == K_BELL ? 80 : e->kind == K_UNFINISHED ? 200 : 110);
+		/* Health over it once hurt (the boss's is at the bottom). */
 		int hp_max = e->kind == K_BELL ? 40 : 60;
-		if (e->hp < hp_max && e->state != E_DYING) {
+		if (e->kind != K_UNFINISHED && e->hp < hp_max && e->state != E_DYING) {
 			Proj p;
 			project(x, -270, z, &p);
 			if (p.z > NEAR_Z) {
