@@ -11,6 +11,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const RUNS = Number(process.argv[2] ?? 3);
+// Reaction time in frames: a blow is only seen this long after its windup
+// starts (a person needs a moment); and a slip now and then.
+const REACT = Number(process.env.REACT ?? 14), SLIP = Number(process.env.SLIP ?? 0.08);
+let rngState = Number(process.env.SEED ?? 1);
+const rand = () => ((rngState = (rngState * 1103515245 + 12345) >>> 0) / 4294967296);
 const HARNESS = process.argv[3] ?? '/home/user/ps1-test/harness';
 const { EmuHarness } = await import(pathToFileURL(path.join(HARNESS, 'driver.mjs')).href);
 
@@ -48,10 +53,15 @@ async function readState(emu) {
 }
 
 // Frames until a blow lands on each tile (Infinity: none coming).
+const slips = [];
 function dangerMap(st) {
   const d = Array.from({ length: N }, () => new Array(N).fill(Infinity));
   for (const e of st.enemies) {
-    if (e.state !== ES.WINDUP) continue;
+    if (e.state !== ES.WINDUP || e.t < REACT) continue;   /* not noticed yet */
+    const m = slips[e.i];                                  /* misread this one? (once per blow) */
+    if (!m || e.t < m.t || m.attack !== e.attack) slips[e.i] = { slip: rand() < SLIP };
+    slips[e.i].t = e.t; slips[e.i].attack = e.attack;
+    if (slips[e.i].slip) continue;
     const left = e.windup - e.t;
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (e.target[y * N + x] && left < d[y][x]) d[y][x] = left;
   }
@@ -66,9 +76,18 @@ const occupied = (st, x, y) => st.enemies.some((e) => alive(e) && e.x === x && e
 function decide(st, danger, mem) {
   const { p } = st;
   if (p.state === PS.DEAD) return st.floor_t > 100 ? { tap: ['CROSS'] } : null;
+  if (st.floor_state === 0 && st.wave > 0 && p.state === PS.IDLE && (p.x !== 4 || p.y !== 4)) {
+    /* a breather: the edge is about to fall, get to the middle */
+    const [b] = DIRS.find(([, dx, dy]) => (dx && Math.sign(4 - p.x) === dx) || (dy && Math.sign(4 - p.y) === dy));
+    return { hold: [b], frames: 3 };
+  }
   if (st.floor_state !== 1 || [PS.DODGE, PS.FALL, PS.PUSH, PS.JUMP].includes(p.state)) return null;
   const here = danger[p.y]?.[p.x] ?? Infinity;
   const busy = p.state === PS.ATTACK || p.state === PS.DRINK || p.state === PS.WALK || p.state === PS.CHARGE;
+  // 0. Next to a foe with time to land a swing before its blow: strike first.
+  const fd = DIRS[p.facing];
+  const adj = st.enemies.find((e) => alive(e) && e.state !== ES.RISE && e.x === p.x + fd[1] && e.y === p.y + fd[2]);
+  if (adj && !busy && p.stamina > 0 && here < Infinity && here > 16) return { tap: ['SQUARE'] };
   // 1. Out of a blow's way: walk if there's time, else dodge, else jump.
   if (here < Infinity) {
     const safe = (x, y, by) => inside(st, x, y) && !occupied(st, x, y) && (danger[y][x] === Infinity || danger[y][x] > by);
@@ -130,7 +149,8 @@ async function run(n) {
   await emu.waitFor({ address: sym('screen'), as: 's32', op: 'eq', value: 1 }, { maxFrames: 300 });
   const start = await emu.frameNum();
   let deaths = 0, lastState = -1, waveDeaths = [0, 0, 0, 0], hurt = 0, lastHp = 100, frames = 0;
-  const LIMIT = 60 * 60 * 12;   // 12 minutes of game
+  const LIMIT = 60 * 60 * Number(process.env.MINUTES ?? 12);   // minutes of game
+  let nextLog = 0;
   for (;;) {
     const st = await readState(emu);
     if (st.screen === 3 || st.screen === 0) break;
@@ -140,6 +160,10 @@ async function run(n) {
     if (st.p.hp < lastHp && st.p.state !== PS.DEAD) hurt += lastHp - st.p.hp;
     lastHp = st.p.state === PS.DEAD ? 100 : st.p.hp;
     lastState = st.p.state;
+    if (process.env.VERBOSE && frames >= nextLog) {
+      nextLog = frames + 300;
+      console.log(frames, 'wave', st.wave, 'fs', st.floor_state, 'p', st.p.x, st.p.y, 'st', st.p.state, 'hp', st.p.hp, 'sta', st.p.stamina, 'en', st.enemies.filter(alive).map((e) => `${e.x},${e.y} s${e.state} hp${e.hp}`).join(' '));
+    }
     const act = decide(st, dangerMap(st));
     if (!act) { await emu.waitFrames(2); continue; }
     if (act.tap) await emu.tap(act.tap, 2, 1);
