@@ -302,8 +302,18 @@ static void update_framing(void) {
 
 /* The camera: south of the floor, high, looking down; it frames the fight
  * (closer when it's all near the soul, wider as it spreads). */
+static int finisher_t, fin_x, fin_z;   /* a broken husk finished: the camera close in */
+#define FINISHER_FRAMES 42
+
 static void update_camera(int frame) {
-	int sp = isin(CAM_PITCH), cp = icos(CAM_PITCH);
+	/* The finisher: in close and lower, then back out (k 0..256..0). */
+	int fk = 0;
+	if (finisher_t > 0) {
+		int t = FINISHER_FRAMES - finisher_t--;
+		fk = t < 10 ? t * 256 / 10 : finisher_t < 14 ? finisher_t * 256 / 14 : 256;
+	}
+	int pitch = CAM_PITCH - (150 * fk >> 8);
+	int sp = isin(pitch), cp = icos(pitch);
 	if (frame_w <= 0 || (floor_state == F_WAVE_INTRO && wave == 0 && floor_t < 2)) { frame_x = frame_z = 0; frame_w = grid_n << 8; }
 	update_framing();
 	int dist = (frame_w * CAM_DIST_PER_TILE >> 8) - zoom;
@@ -330,6 +340,11 @@ static void update_camera(int frame) {
 		dist -= 650 * k >> 12;
 		pan_x += ((bx - pan_x) * k >> 12) + (isin(t * 4096 / BOSS_INTRO) * 220 >> 12);
 		look_z += (bz + 420 - look_z) * k >> 12;   /* aim up at it: it's tall */
+	}
+	if (fk) {
+		dist += (3 * CAM_DIST_PER_TILE - dist) * fk >> 8;
+		pan_x += (fin_x - pan_x) * fk >> 8;
+		look_z += (fin_z + 60 - look_z) * fk >> 8;
 	}
 	cam_x = kick_x + pan_x;
 	cam_y = -(dist * sp >> 12);
@@ -898,13 +913,14 @@ static void shadow(int x, int z, int r) {
 
 /* ---- The floor ------------------------------------------------------------------- */
 
-static int32_t fall_at[MAX_N][MAX_N];   /* floor_t when each slab starts to fall */
+static int32_t fall_at[MAX_N][MAX_N];
+static uint8_t grab_tile[MAX_N][MAX_N];   /* the rope's reach: purple, not red */   /* floor_t when each slab starts to fall */
 static uint8_t crack_t[MAX_N][MAX_N];   /* a heavy blow cracked it: fades */
 static int tired_t;                     /* an action wanted more stamina: flash */
 /* Numbers and words over the fight (damage, "BROKEN"): rising, fading. */
 #define MAX_POPS 8
 static struct { int32_t x, z, t; int16_t v, kind; } pops[MAX_POPS];
-enum { POP_HIT, POP_HEAVY, POP_RIPOSTE, POP_BROKEN };
+enum { POP_HIT, POP_HEAVY, POP_RIPOSTE, POP_BROKEN, POP_FINISHED, POP_BACKSTAB, POP_GRABBED };
 static void pop(int tx, int ty, int v, int kind) {
 	int best = 0;
 	for (int i = 1; i < MAX_POPS; i++) if (pops[i].t > pops[best].t) best = i;
@@ -923,7 +939,10 @@ static void draw_floor(int frame) {
 	game_player_tile(&px, &py);
 	int any_tele = 0;
 	for (int y = 0; y < n; y++)
-		for (int x = 0; x < n; x++) any_tele |= tele[y][x] = game_telegraph(x, y);
+		for (int x = 0; x < n; x++) {
+			any_tele |= tele[y][x] = game_telegraph(x, y);
+			grab_tile[y][x] = tele[y][x] && game_telegraph_grab(x, y);
+		}
 	/* The light at each corner where four slabs meet. */
 	static int16_t corner[MAX_N + 1][MAX_N + 1][3];
 	for (int y = 0; y <= n; y++)
@@ -997,7 +1016,8 @@ static void draw_floor(int frame) {
 					int nx = tx + (i & 1 ? 1 : -1), ny = ty + (i < 2 ? -1 : 1);
 					if (nx >= 0 && nx < n && tele[ty][nx] / 6 > red) red = tele[ty][nx] / 6;
 					if (ny >= 0 && ny < n && tele[ny][tx] / 6 > red) red = tele[ny][tx] / 6;
-					r += red; g -= red / 4; bb -= red / 4;
+					if (grab_tile[ty][tx]) { r += red / 3; g -= red / 3; bb += red; }   /* purple */
+					else { r += red; g -= red / 4; bb -= red / 4; }
 				}
 				if (own && (frame & 4)) { r += 90; g -= 30; bb -= 30; }   /* your own tile flashes */
 				if (t[i].z > FOG_NEAR) {
@@ -1019,7 +1039,7 @@ static void draw_floor(int frame) {
 			setRGB2(q, col[2][0], col[2][1], col[2][2]);
 			setRGB3(q, col[3][0], col[3][1], col[3][2]);
 			q->tpage = slab_tpage;
-			q->clut = slab_clut[tg >= 256 || (sl < 0 && sl > -40) ? 2 : tg > 0 || sl < 0 ? 1 : 0];
+			q->clut = slab_clut[grab_tile[ty][tx] ? 0 : tg >= 256 || (sl < 0 && sl > -40) ? 2 : tg > 0 || sl < 0 ? 1 : 0];
 			addPrim(s, q);
 			prim += sizeof(POLY_GT4);
 			/* Cracked by a heavy blow: dark lines across it, fading. */
@@ -1291,17 +1311,14 @@ static void draw_hud(int frame) {
 	/* The boss's entrance is a scene of its own: no HUD over the letterbox. */
 	if (floor_state == F_BOSS_INTRO) goto scene;
 	panel(6, 5, 148, 25, 1);
-	/* Health: what a blow took stays pale a moment, then drains away. */
-	static int hp_shown = HP_MAX << 8, hp_wait;
-	if (p->hp << 8 > hp_shown || floor_state == F_WAVE_INTRO) hp_shown = p->hp << 8, hp_wait = 0;
-	else if (p->hp << 8 < hp_shown) {
-		if (p->hurt_t < 2) hp_wait = 40;
-		if (hp_wait > 0) { if (ticked_frame) hp_wait--; }
-		else if (ticked_frame) hp_shown -= 96;
-		if (hp_shown < p->hp << 8) hp_shown = p->hp << 8;
-	}
+	/* Health: what a blow took stays pale while it can still be won back
+	 * (rally: strike back), fading at the end. */
 	bar(11, 9, 100, 7, p->hp, HP_MAX, 200, 36, 30, 0);
-	if (hp_shown >> 8 > p->hp) bar(11, 9, 100, 7, hp_shown >> 8, HP_MAX, 235, 205, 180, 0);
+	if (p->rally > 0 && p->rally_t > 0) {
+		int k = p->rally_t > 40 ? 256 : p->rally_t * 256 / 40;
+		int top = p->hp + p->rally > HP_MAX ? HP_MAX : p->hp + p->rally;
+		bar(11, 9, 100, 7, top, HP_MAX, 120 + 115 * k / 256, 60 + 145 * k / 256, 50 + 130 * k / 256, 0);
+	}
 	/* Stamina: flashes red when an action wanted more than there was. */
 	if (tired_t > 0 && ticked_frame) tired_t--;
 	int tired = tired_t > 0 && (tired_t & 4);
@@ -1332,6 +1349,11 @@ static void draw_hud(int frame) {
 		int f = t < 36 ? 256 : (50 - t) * 256 / 14;
 		if (k == POP_BROKEN) {
 			text(p.x, p.y - 12, "BROKEN", FONT_SMALL, 160 * f >> 8, 200 * f >> 8, 255 * f >> 8, 1, 0);
+		} else if (k >= POP_FINISHED) {
+			static const char *W[] = { "FINISHED", "BACKSTAB", "CAUGHT" };
+			static const uint8_t C[3][3] = { { 255, 215, 140 }, { 255, 140, 110 }, { 200, 150, 255 } };
+			const uint8_t *c = C[k - POP_FINISHED];
+			text(p.x, p.y - 24, W[k - POP_FINISHED], k == POP_FINISHED ? FONT_LARGE : FONT_SMALL, c[0] * f >> 8, c[1] * f >> 8, c[2] * f >> 8, 1, 0);
 		} else {
 			sprintf(line, "%d", pops[i].v);
 			int r = 235, g = k == POP_RIPOSTE ? 190 : k == POP_HEAVY ? 170 : 225, b = k == POP_RIPOSTE ? 80 : k == POP_HEAVY ? 110 : 205;
@@ -1440,12 +1462,16 @@ static void soul_pose(Pose *ps) {
 		if (p->t >= CHARGE_FULL && (game_frames & 2)) ps->pitch[SOUL_SWORD_ARM] += 60;   /* straining */
 		break;
 	case P_ATTACK:
-		if (p->heavy) animate(&soul_anim, P_ATTACK + 100, A_SOUL_HEAVY, p->t, 32, 0, ps);
-		else animate(&soul_anim, P_ATTACK, A_SOUL_ATTACK, p->t, 22, 2, ps);
+		/* The heavy blow; a light chain's third swing is an overhead too,
+		 * its second comes back the other way. */
+		if (p->heavy || p->combo == 2) animate(&soul_anim, P_ATTACK + 100 + p->combo, A_SOUL_HEAVY, p->t, p->frames, 2, ps);
+		else animate(&soul_anim, P_ATTACK + p->combo, A_SOUL_ATTACK, p->t, p->frames, 2, ps);
+		if (!p->heavy && p->combo == 1) { ps->yaw[SOUL_SWORD_ARM] = -ps->yaw[SOUL_SWORD_ARM]; ps->lean = -ps->lean; }
 		break;
-	case P_DRINK:  animate(&soul_anim, P_DRINK, A_SOUL_DRINK, p->t, 45, BLEND_FRAMES, ps); break;
+	case P_DRINK:  animate(&soul_anim, P_DRINK, A_SOUL_DRINK, p->t, 40, BLEND_FRAMES, ps); break;
 	case P_DEAD:   animate(&soul_anim, P_DEAD, A_SOUL_DEAD, p->t, 60, 4, ps); break;
 	case P_FALL:   animate(&soul_anim, P_FALL, A_SOUL_JUMP, 8 + p->t / 8, JUMP_FRAMES, 4, ps); break;
+	case P_PUSH:   animate(&soul_anim, P_PUSH, A_SOUL_IDLE, 0, 120, 2, ps); ps->lean -= 260; break;
 	default:       animate(&soul_anim, P_IDLE, A_SOUL_IDLE, game_frames, 120, BLEND_FRAMES, ps); break;
 	}
 	/* Flinch when hit. */
@@ -1464,9 +1490,9 @@ static void husk_pose(int i, Pose *ps) {
 	int phase = i * 37;   /* not all breathing together */
 	if (e->kind == K_BELL) {
 		switch (e->state) {
-		case E_MOVE:    animate(an, E_MOVE, A_BELL_MOVE, e->t, 30, BLEND_FRAMES, ps); break;
-		case E_WINDUP:  animate(an, E_WINDUP, A_BELL_RING, e->t, 20, 6, ps); break;
-		case E_RECOVER: animate(an, E_RECOVER, A_BELL_RECOVER, e->t, 50, 3, ps); break;
+		case E_MOVE:    animate(an, E_MOVE, A_BELL_MOVE, e->t, BELL_MOVE, BLEND_FRAMES, ps); break;
+		case E_WINDUP:  animate(an, E_WINDUP, A_BELL_RING, e->t, SLOW(20), 6, ps); break;
+		case E_RECOVER: animate(an, E_RECOVER, A_BELL_RECOVER, e->t, SLOW(50), 3, ps); break;
 		case E_STAGGER: animate(an, E_STAGGER, A_BELL_RECOVER, 0, 50, 4, ps); ps->lean -= 150; break;
 		case E_DYING:   *ps = an->last; break;
 		default:        animate(an, E_IDLE, A_BELL_IDLE, game_frames + phase, 110, BLEND_FRAMES, ps); break;
@@ -1481,15 +1507,15 @@ static void husk_pose(int i, Pose *ps) {
 	}
 	switch (e->state) {
 	case E_SLEEP:   animate(an, E_SLEEP, A_HUSK_SLEEP, game_frames + phase, 150, 0, ps); break;
-	case E_WAKE:    animate(an, E_WAKE, A_HUSK_WAKE, e->t, 45, 0, ps); break;
-	case E_MOVE:    animate(an, E_MOVE, A_HUSK_MOVE, e->t, 36, BLEND_FRAMES, ps); break;
+	case E_WAKE:    animate(an, E_WAKE, A_HUSK_WAKE, e->t, SLOW(45), 0, ps); break;
+	case E_MOVE:    animate(an, E_MOVE, A_HUSK_MOVE, e->t, HUSK_MOVE, BLEND_FRAMES, ps); break;
 	case E_WINDUP:
 		animate(an, E_WINDUP, A_HUSK_WINDUP, e->t, e->windup, 8, ps);
 		if (e->attack == 2) { ps->yaw[HUSK_RIGHT_ARM] += 600; ps->yaw[HUSK_LEFT_ARM] -= 600; }   /* the cross: arms spread */
 		if (e->t > e->windup - 15) ps->dy += (game_frames & 2) ? -2 : 2;                        /* about to fall */
 		break;
-	case E_RECOVER: animate(an, E_RECOVER, A_HUSK_RECOVER, e->t, 50, 2, ps); break;
-	case E_STAGGER: animate(an, E_STAGGER, A_HUSK_STAGGER, e->t, 30, 4, ps); break;
+	case E_RECOVER: animate(an, E_RECOVER, A_HUSK_RECOVER, e->t, SLOW(50), 2, ps); break;
+	case E_STAGGER: animate(an, E_STAGGER, A_HUSK_STAGGER, e->t, SLOW(30), 4, ps); break;
 	case E_DYING:   *ps = an->last; break;
 	default:        animate(an, E_IDLE, A_HUSK_IDLE, game_frames + phase, 100, BLEND_FRAMES, ps); break;
 	}
@@ -1527,6 +1553,25 @@ static void handle_events(void) {
 			break;
 		case EV_TIRED:
 			tired_t = 24;
+			break;
+		case EV_FINISHER:
+			finisher_t = FINISHER_FRAMES;
+			tile_world(e->x * 16, e->y * 16, &fin_x, &fin_z);
+			burst(e->x, e->y, 36, 255, 210, 140, 20, 160);
+			light_tile(e->x, e->y, 255, 220, 150, 44, 40);
+			pop(e->x, e->y, 0, POP_FINISHED);
+			break;
+		case EV_BACKSTAB:
+			pop(e->x, e->y, 0, POP_BACKSTAB);
+			burst(e->x, e->y, 14, 255, 120, 90, 12, 150);
+			break;
+		case EV_GRAB:
+			burst(e->x, e->y, 16, 190, 120, 255, 10, 100);
+			light_tile(e->x, e->y, 180, 110, 255, 28, 24);
+			pop(e->x, e->y, 0, POP_GRABBED);
+			break;
+		case EV_RALLY:
+			light_tile(e->x, e->y, 230, 200, 170, 14, 8);
 			break;
 		case EV_BROKEN:   /* the husk's guard shatters: pale blue shards */
 			pop(e->x, e->y, 0, POP_BROKEN);
@@ -1614,9 +1659,10 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 
 	/* Where the soul is (between tiles while dodging). */
 	int fx = player.x * 16, fy = player.y * 16;
-	if (player.state == P_DODGE || player.state == P_WALK || player.state == P_FALL) {
-		int n = player.state == P_WALK ? WALK_FRAMES : player.state == P_FALL ? 12 : DODGE_FRAMES;
-		int t = player.t < n ? player.t : n;
+	if (player.state == P_DODGE || player.state == P_WALK || player.state == P_FALL || player.state == P_PUSH || player.step_t) {
+		int n = player.state == P_WALK ? WALK_FRAMES : player.state == P_FALL ? 12 : player.state == P_PUSH ? player.push_frames :
+		        player.step_t ? WALK_FRAMES * 2 : DODGE_FRAMES;
+		int t = player.step_t ? player.step_t : player.t < n ? player.t : n;
 		fx = player.from_x * 16 + (player.x - player.from_x) * 16 * t / n;
 		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * t / n;
 	}
@@ -1692,18 +1738,14 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		if (e->state == E_NONE) { enemy_yaw[i] = -1; husk_anim[i].state = -1; continue; }
 		int ex = e->x * 16, ey = e->y * 16;
 		if (e->state == E_MOVE) {
-			int n = e->kind == K_BELL ? 30 : e->kind == K_UNFINISHED ? 40 : 36;
+			int n = e->kind == K_BELL ? BELL_MOVE : e->kind == K_UNFINISHED ? BOSS_MOVE : HUSK_MOVE;
 			ex = e->from_x * 16 + (e->x - e->from_x) * 16 * e->t / n;
 			ey = e->from_y * 16 + (e->y - e->from_y) * 16 * e->t / n;
 		}
 		int x, z;
 		tile_world(ex, ey, &x, &z);
-		/* Turn to face the soul. */
-		int want = 0;
-		{
-			int dx = soul_x - x, dz = soul_z - z, adx = dx < 0 ? -dx : dx, adz = dz < 0 ? -dz : dz;
-			want = adx > adz ? (dx > 0 ? 1024 : 3072) : (dz > 0 ? 0 : 2048);
-		}
+		/* Turned the way the game says it faces (its back can be struck). */
+		int want = e->facing * 1024;
 		if (enemy_yaw[i] < 0) enemy_yaw[i] = want;
 		if (e->state != E_WINDUP && e->state != E_RECOVER && e->state != E_SLEEP) enemy_yaw[i] = ease_angle(enemy_yaw[i], want, 6);
 		Pose ps;
@@ -1721,7 +1763,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		int tint = e->hit_t < 5 || e->state == E_DYING ? 1 : e->state == E_STAGGER ? 3 : 0;
 		model_red = e->x >= 0 && e->x < grid_n && e->y >= 0 && e->y < grid_n ? tele[e->y][e->x] / 3 : 0;
 		/* A sleeper's embers burn low; waking, they flare. */
-		model_glow = e->state == E_SLEEP ? 50 : e->state == E_WAKE ? 256 + 200 * (45 - e->t) / 45 : 256;
+		model_glow = e->state == E_SLEEP ? 50 : e->state == E_WAKE ? 256 + 200 * (SLOW(45) - e->t) / SLOW(45) : 256;
 		const Model *model = e->kind == K_BELL ? &bell_model : e->kind == K_UNFINISHED ? &unfinished_model : &husk_model;
 		int wy = 0;
 		if (e->kind == K_UNFINISHED && floor_state == F_BOSS_INTRO) {
@@ -1788,7 +1830,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 			ground_glow(soul_x, soul_z, 210, soul_glow + (isin((game_frames * 60) & 4095) >> 9));   /* a candle's flicker */
 		}
 		/* The sword's arc as it strikes. */
-		int strike = 8;   /* light and heavy both land on frame 8 */
+		int strike = player.windup;
 		if (player.state == P_ATTACK && player.t >= strike && player.t < strike + 5) {
 			static const int8_t DX[4] = { 0, 1, 0, -1 }, DY[4] = { -1, 0, 1, 0 };
 			int ax, az;

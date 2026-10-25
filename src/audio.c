@@ -57,6 +57,7 @@ void audio_events(void) {
 		[EV_HURT] = SFX_HURT, [EV_DEATH] = SFX_DEATH, [EV_WINDUP] = SFX_WINDUP, [EV_SLAM] = SFX_SLAM,
 		[EV_HEAL] = SFX_HEAL, [EV_RECOVER] = SFX_RECOVER, [EV_CLEAR] = SFX_RECOVER, [EV_RISE] = -1, [EV_TRIAL] = SFX_HEAL, [EV_BOSS] = -1, [EV_BELL] = -1, [EV_WAKE] = SFX_WINDUP,
 		[EV_FALL] = SFX_DODGE, [EV_CRUMBLE] = -1, [EV_PERFECT] = SFX_PARRY, [EV_SPAWN] = -1, [EV_LOCK] = SFX_TURN, [EV_BROKEN] = SFX_BLOCK,
+		[EV_TIRED] = -1, [EV_FINISHER] = SFX_KILL, [EV_BACKSTAB] = SFX_RIPOSTE, [EV_GRAB] = SFX_HURT, [EV_RALLY] = -1,
 	};
 	for (int i = 0; i < num_events; i++) {
 		int t = game_events[i].type;
@@ -66,7 +67,7 @@ void audio_events(void) {
 		audio_play(SOUND[t], t == EV_WINDUP ? 0x2000 : 0x3800, pitch);
 		/* Voices: a choir swells on a riposte and when the floor falls
 		 * silent; the soul sighs as it rises again. */
-		if (t == EV_RIPOSTE || t == EV_CLEAR) music_voice(INST_SWELL, 57, 0x2c00, 0);
+		if (t == EV_RIPOSTE || t == EV_CLEAR || t == EV_FINISHER) music_voice(INST_SWELL, t == EV_FINISHER ? 52 : 57, 0x2c00, 0);
 		if (t == EV_RISE) music_voice(INST_SIGH, 60, 0x3000, 0);
 		if (t == EV_BELL) music_voice(INST_BELL, 64 + (game_frames / 20) % 2 * 3, 0x3400, (game_events[i].x - 4) * 12);   /* a toll, from its side */
 		if (t == EV_WAKE) audio_play(SFX_SLAM, 0x3000, 2800);   /* a low roar */
@@ -86,6 +87,9 @@ void audio_events(void) {
 		case EV_BOSS:    pad_rumble(0, 200, 40); break;
 		case EV_SLAM:    if (boss >= 0) pad_rumble(0, 170, 8); break;
 		case EV_PERFECT: pad_rumble(8, 0, 0); break;
+		case EV_FINISHER: pad_rumble(10, 255, 24); break;
+		case EV_BACKSTAB: pad_rumble(6, 180, 10); break;
+		case EV_GRAB:    pad_rumble(0, 220, 30); break;
 		}
 	}
 }

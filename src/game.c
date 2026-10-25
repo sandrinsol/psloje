@@ -8,61 +8,62 @@
 #include "game.h"
 
 /* Player timing (frames) and costs. Stamina is kept x16 for slow refills. */
-#define DODGE_COST      (25 * 16)
-#define ATTACK_WINDUP   8      /* sword: hits on frame 8 */
-#define ATTACK_FRAMES   22
-#define ATTACK_COST     (12 * 16)
-#define ATTACK_DAMAGE   20
-#define HEAVY_WINDUP    8      /* charged: hits on frame 8 of the swing (a weightier release) */
-#define HEAVY_FRAMES    32
+#define DODGE_COST      (50 * 16)   /* half the bar */
+#define ATTACK_COST     (12 * 16)   /* each light swing (see COMBO) */
+#define HEAVY_WINDUP    SLOW(8)     /* charged: hits on frame 10 of the swing (a weightier release) */
+#define HEAVY_FRAMES    SLOW(32)
 #define HEAVY_COST      (30 * 16)
 #define HEAVY_DAMAGE    50     /* and it breaks the husk (staggers it) */
+/* Light swings chain, three at most: { the frame it hits, its length, damage }.
+ * The first is quicker than the old single swing; the third is the heaviest. */
+static const int8_t COMBO[3][3] = { { 8, SLOW(22), 20 }, { 7, SLOW(20), 20 }, { 10, SLOW(27), 35 } };
+#define COMBO_WINDOW    14     /* frames after a light swing ends: the next one carries on the chain */
+#define BACKSTAB_FACTOR 2      /* a blow on an enemy's back, and it staggers */
+#define COUNTER_FRAMES  SLOW(30)   /* after a perfect dodge: a riposte, whoever's hit */
+#define GRAB_DAMAGE     20
 #define RIPOSTE_FACTOR  3      /* any hit on a broken husk */
 #define JUMP_COST       (20 * 16)
-#define STAMINA_REGEN   13     /* /16 a frame: ~49 a second */
+#define STAMINA_REGEN   17     /* /16 a frame: ~64 a second (a dodge is half the bar) */
 #define STAMINA_WAIT    15
-#define DRINK_FRAMES    45
-#define DRINK_HEAL_AT   30
+#define DRINK_FRAMES    40     /* standing still: quicker than it was, still a risk */
+#define DRINK_HEAL_AT   26
 #define FLASK_HEAL      40
 #define FLASKS          3
-#define BUFFER_FRAMES   12     /* a press while busy is kept this long */
+#define BUFFER_FRAMES   15     /* a press while busy is kept this long */
 #define PERFECT_FRAMES  6      /* a dodge this late before a blow lands: perfect */
 #define PERFECT_STAMINA (30 * 16)
 #define WAVE_HEAL       25     /* health back as a wave falls */
 #define CRUMBLE_FRAMES  110    /* the edge cracks this long before it falls */
 #define BREATHER        220    /* between waves: the edge falls, then the next rise */
-#define LIGHT_CANCEL    (ATTACK_WINDUP + 6)   /* a swing's recovery can be cut by a dodge or jump from here */
-#define HEAVY_CANCEL    (HEAVY_WINDUP + 12)
+#define LIGHT_CANCEL    7      /* frames after a light hit: its recovery can be cut (dodge, jump, the next swing) */
+#define HEAVY_CANCEL    SLOW(12)
 
 /* Sloth's husk. */
 #define HUSK_HP         60
 #define HUSK_DAMAGE     30
-#define HUSK_IDLE       50
-#define HUSK_MOVE       36
-#define HUSK_RECOVER    45
-#define HUSK_STAGGER    60
+#define HUSK_IDLE       SLOW(50)
+#define HUSK_RECOVER    SLOW(45)
+#define HUSK_STAGGER    SLOW(60)
 #define HUSK_DYING      30
 #define HUSK_REWARD     40
 #define WAKE_RANGE      2      /* a sleeper wakes when you come this near (or strike it) */
-#define WAKE_FRAMES     45
+#define WAKE_FRAMES     SLOW(45)
 #define SLEEP_FACTOR    2      /* a blow on a sleeper */
 #define BELL_HP         40
-#define BELL_IDLE       40
-#define BELL_MOVE       30
-#define BELL_WINDUP     80     /* four tolls */
-#define BELL_RECOVER    50
+#define BELL_IDLE       SLOW(40)
+#define BELL_WINDUP     SLOW(80)   /* four tolls */
+#define BELL_RECOVER    SLOW(50)
 
 /* The Unfinished. */
 #define BOSS_DAMAGE     35
-#define BOSS_IDLE       44     /* between blows; faster below half its life */
-#define BOSS_IDLE_ANGRY 26
-#define BOSS_MOVE       40
-#define BOSS_RECOVER    40
+#define BOSS_IDLE       SLOW(44)   /* between blows; faster below half its life */
+#define BOSS_IDLE_ANGRY SLOW(26)
+#define BOSS_RECOVER    SLOW(40)
 #define BOSS_REWARD     200
 #define BRIGHT_FRAMES   15     /* the last frames of a windup: bright */
 
 enum { ATK_SLAM, ATK_LINE, ATK_CROSS, ATK_RING, ATK_UNDONE, ATK_UNDONE2, ATK_TOMORROW, ATK_TOMORROW2, ATK_ROPE,
-       ATK_UNRAVEL, ATK_UNRAVEL2, ATK_LOOSE, ATK_LOOSE2 };
+       ATK_UNRAVEL, ATK_UNRAVEL2, ATK_LOOSE, ATK_LOOSE2, ATK_GRAB };
 
 int32_t grid_n = 9;
 int32_t area_x0, area_y0, area_x1 = 8, area_y1 = 8;
@@ -174,6 +175,7 @@ static void start_crumble(int w) {
 
 /* Once a frame: crumbling slabs fall; the soul on one falls with it. */
 static void start_fall(int from_x, int from_y, int to_x, int to_y);
+static void push_to(int fx, int fy, int tx, int ty, int frames);
 static void player_tile(int *x, int *y);
 static void update_slabs(void) {
 	for (int y = 0; y < MAX_N; y++)
@@ -288,7 +290,8 @@ static void player_tile(int *x, int *y) {
 		if (k > n) k = n;
 		*x = player.from_x + (n ? dx / n * k : 0);
 		*y = player.from_y + (n ? dy / n * k : 0);
-	} else if (player.state == P_WALK && player.t < WALK_FRAMES / 2) {
+	} else if ((player.state == P_WALK && player.t < WALK_FRAMES / 2) || (player.state == P_PUSH && player.t < player.push_frames / 2) ||
+	           (player.step_t && player.step_t < WALK_FRAMES)) {
 		*x = player.from_x;
 		*y = player.from_y;
 	} else {
@@ -324,8 +327,9 @@ static void start_fall(int from_x, int from_y, int to_x, int to_y) {
 	emit(EV_FALL, from_x, from_y);
 }
 
-/* An attack from (ex, ey) lands on the player's tile. */
-static void player_hit(int ex, int ey, int damage) {
+/* An attack from (ex, ey) lands on the player's tile; a heavy one (push)
+ * knocks it a tile away, maybe off the edge. */
+static void player_hit(int ex, int ey, int damage, int push) {
 	if (player.state == P_DEAD || player.state == P_FALL)
 		return;
 	if (player.state == P_DODGE && player.t >= IFRAME_FIRST && player.t <= IFRAME_LAST)
@@ -340,6 +344,10 @@ static void player_hit(int ex, int ey, int damage) {
 	player.hp -= damage;
 	stats.hurt += damage;
 	player.hurt_t = 0;
+	/* What it took stays pale a while: strike back to win half of each blow's back. */
+	player.rally += damage;
+	if (player.rally > HP_MAX) player.rally = HP_MAX;
+	player.rally_t = RALLY_FRAMES;
 	shake_t = 10;
 	hitstop(5);
 	emit(EV_HURT, px, py);
@@ -350,7 +358,27 @@ static void player_hit(int ex, int ey, int damage) {
 	if (player.hp <= 0) {
 		player.hp = 0;
 		die();
+		return;
 	}
+	if (push) {
+		int dx = px - ex, dy = py - ey, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+		int sx = adx >= ady ? (dx > 0) - (dx < 0) : 0, sy = adx >= ady ? 0 : (dy > 0) - (dy < 0);
+		if ((sx || sy) && enemy_at(px + sx, py + sy) < 0) push_to(px, py, px + sx, py + sy, PUSH_FRAMES);
+	}
+}
+
+/* Knocked (or dragged) from one tile to the next: no control for a moment;
+ * onto nothing, it falls. */
+static void push_to(int fx, int fy, int tx, int ty, int frames) {
+	if (!inside(tx, ty)) { start_fall(fx, fy, tx, ty); return; }
+	player.from_x = fx;
+	player.from_y = fy;
+	player.x = tx;
+	player.y = ty;
+	player.state = P_PUSH;
+	player.t = 0;
+	player.step_t = 0;
+	player.push_frames = frames;
 }
 
 static int dir_of(uint16_t bits) {
@@ -431,6 +459,12 @@ static void face_nearest(void) {
 static int swing(int heavy) {
 	int cost = heavy ? HEAVY_COST : ATTACK_COST;
 	if (player.stamina <= 0) { emit(EV_TIRED, player.x, player.y); return 0; }
+	/* Light swings close together chain (three at most); a heavy one ends it. */
+	if (heavy) player.combo = 0;
+	else player.combo = player.combo_t <= COMBO_WINDOW && !player.heavy ? (player.combo + 1) % 3 : 0;
+	player.windup = heavy ? HEAVY_WINDUP : COMBO[player.combo][0];
+	player.frames = heavy ? HEAVY_FRAMES : COMBO[player.combo][1];
+	player.step_t = 0;
 	player.state = P_ATTACK;
 	player.heavy = heavy;
 	player.t = 0;
@@ -458,14 +492,30 @@ static void sword_hits(void) {
 	Enemy *e = &enemies[i];
 	if (e->state == E_RISE)
 		return;   /* still ash */
-	int heavy = player.heavy, riposte = e->state == E_STAGGER, asleep = e->state == E_SLEEP;
-	int damage = (heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE) * (riposte ? RIPOSTE_FACTOR : asleep ? SLEEP_FACTOR : 1);
+	int heavy = player.heavy, broken = e->state == E_STAGGER, asleep = e->state == E_SLEEP;
+	/* Right after a perfect dodge, any blow is a riposte. */
+	int riposte = broken || player.counter_t > 0;
+	player.counter_t = 0;
+	/* On its back (it faces away from the soul): double, and it staggers. */
+	int backstab = !riposte && !asleep && e->kind != K_UNFINISHED &&
+	               player.x == tx - DX[e->facing] && player.y == ty - DY[e->facing];
+	int damage = (heavy ? HEAVY_DAMAGE : COMBO[player.combo][2]) *
+	             (riposte ? RIPOSTE_FACTOR : asleep ? SLEEP_FACTOR : backstab ? BACKSTAB_FACTOR : 1);
 	e->hp -= damage;
 	e->hit_t = 0;
+	/* Rally: half of each blow wins back what was just lost. */
+	if (player.rally > 0 && player.rally_t > 0) {
+		int back = damage / 2 < player.rally ? damage / 2 : player.rally;
+		player.hp = player.hp + back > HP_MAX ? HP_MAX : player.hp + back;
+		player.rally -= back;
+		emit(EV_RALLY, player.x, player.y);
+	}
 	shake_t = riposte ? 12 : heavy ? 14 : 3;
 	hitstop(riposte ? 12 : heavy ? 13 : 4);
 	emit(riposte ? EV_RIPOSTE : heavy ? EV_HEAVY : EV_HIT, tx, ty);
 	if (num_events) game_events[num_events - 1].v = damage;
+	if (riposte && broken) emit(EV_FINISHER, tx, ty);   /* a broken husk finished: the camera comes in close */
+	if (backstab) emit(EV_BACKSTAB, tx, ty);
 	if (riposte) { stats.ripostes++; trial(TRIAL_RIPOSTE); }
 	if (e->hp <= 0) {
 		e->state = E_DYING;
@@ -490,7 +540,7 @@ static void sword_hits(void) {
 	} else if (riposte) {
 		e->state = E_IDLE;      /* the opening is spent */
 		e->t = 0;
-	} else if (heavy) {
+	} else if (heavy || backstab) {
 		e->state = E_STAGGER;   /* broken: open to a riposte */
 		e->t = 0;
 		emit(EV_BROKEN, tx, ty);
@@ -504,6 +554,9 @@ static void update_player(const Input *in) {
 	p->t++;
 	if (p->hurt_t < 999) p->hurt_t++;
 	if (p->buffer_t > 0 && --p->buffer_t == 0) p->buffered = BUF_NONE;
+	if (p->combo_t < 999) p->combo_t++;
+	if (p->counter_t > 0) p->counter_t--;
+	if (p->rally_t > 0 && --p->rally_t == 0) p->rally = 0;
 	if (p->state == P_DEAD)
 		return;
 	if (p->state == P_FALL) {
@@ -559,20 +612,37 @@ static void update_player(const Input *in) {
 	case P_WALK:
 		if (p->t >= WALK_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
 		break;
+	case P_PUSH:
+		if (p->t >= p->push_frames) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
+		break;
 	case P_CHARGE:
 		/* Let go early: an ordinary swing, already that far along. Held to
-		 * the end: the heavy blow, on release. */
+		 * the end: the heavy blow, on release. Meanwhile a held direction
+		 * walks, at half the pace, facing where it was. */
 		if (p->t == CHARGE_FULL) emit(EV_CHARGED, p->x, p->y);
+		if (p->step_t) {
+			if (++p->step_t >= WALK_FRAMES * 2) { p->step_t = 0; p->from_x = p->x; p->from_y = p->y; }
+		} else if (held_dir >= 0 && p->t > 4) {
+			int nx = p->x + DX[held_dir], ny = p->y + DY[held_dir];
+			if (!inside(nx, ny)) { start_fall(p->x, p->y, nx, ny); return; }
+			if (enemy_at(nx, ny) < 0) {
+				p->from_x = p->x; p->from_y = p->y;
+				p->x = nx; p->y = ny;
+				p->step_t = 1;
+				emit(EV_STEP, nx, ny);
+			}
+		}
 		if (!(in->held & PAD_SQUARE)) {
 			int t = p->t;
+			if (p->step_t) { p->x = p->step_t < WALK_FRAMES ? p->from_x : p->x; p->y = p->step_t < WALK_FRAMES ? p->from_y : p->y; p->from_x = p->x; p->from_y = p->y; p->step_t = 0; }
 			if (t >= CHARGE_FULL) swing(1);
-			else if (swing(0)) p->t = t < ATTACK_WINDUP - 1 ? t : ATTACK_WINDUP - 1;
+			else if (swing(0)) p->t = t < p->windup - 1 ? t : p->windup - 1;
 			else { p->state = P_IDLE; p->t = 0; }
 		}
 		break;
 	case P_ATTACK:
-		if (p->t == (p->heavy ? HEAVY_WINDUP : ATTACK_WINDUP)) sword_hits();
-		if (p->t >= (p->heavy ? HEAVY_FRAMES : ATTACK_FRAMES)) { p->state = P_IDLE; p->t = 0; }
+		if (p->t == p->windup) sword_hits();
+		if (p->t >= p->frames) { p->state = P_IDLE; p->t = 0; p->combo_t = 0; }
 		break;
 	case P_JUMP:
 		if (p->t == AIR_LAST + 1) emit(EV_LAND, p->x, p->y);
@@ -590,8 +660,15 @@ static void update_player(const Input *in) {
 		int cancel = 0;
 		if (p->state == P_WALK) cancel = 1;
 		else if (p->state == P_CHARGE) cancel = p->buffered != BUF_ATTACK;
-		else if (p->state == P_ATTACK) cancel = p->buffered != BUF_ATTACK && p->t >= (p->heavy ? HEAVY_CANCEL : LIGHT_CANCEL);
+		/* A light swing's end can be cut by the next swing too (the chain). */
+		else if (p->state == P_ATTACK) cancel = (p->buffered != BUF_ATTACK || !p->heavy) &&
+		                                        p->t >= (p->heavy ? p->windup + HEAVY_CANCEL : p->windup + LIGHT_CANCEL);
 		if (cancel) {
+			if (p->state == P_ATTACK) p->combo_t = 0;
+			if (p->state == P_CHARGE && p->step_t) {   /* a slow step not halfway: back */
+				if (p->step_t < WALK_FRAMES) { p->x = p->from_x; p->y = p->from_y; }
+				p->step_t = 0;
+			}
 			if (p->state == P_WALK && p->t < WALK_FRAMES / 2) { p->x = p->from_x; p->y = p->from_y; }
 			p->from_x = p->x;
 			p->from_y = p->y;
@@ -626,9 +703,10 @@ static void update_player(const Input *in) {
 		if (!swing(0)) p->state = P_IDLE;
 	}
 
-	/* Always facing the nearest enemy, except mid-swing and mid-dodge (it
-	 * turns once it lands, past an enemy it went over). */
-	if (p->state != P_ATTACK && p->state != P_DODGE) face_nearest();
+	/* Always facing the nearest enemy, except mid-swing, mid-dodge (it
+	 * turns once it lands, past an enemy it went over) and while charging
+	 * (aimed). */
+	if (p->state != P_ATTACK && p->state != P_DODGE && p->state != P_CHARGE && p->state != P_PUSH) face_nearest();
 
 	/* Stamina refills after a short pause. */
 	if (p->stamina_wait > 0) {
@@ -639,7 +717,7 @@ static void update_player(const Input *in) {
 	}
 
 	/* Absolution left here last time. */
-	if (drop_amount > 0 && p->state != P_DODGE && p->state != P_WALK && p->x == drop_x && p->y == drop_y) {
+	if (drop_amount > 0 && p->state != P_DODGE && p->state != P_WALK && !p->step_t && p->x == drop_x && p->y == drop_y) {
 		absolution += drop_amount;
 		drop_amount = 0;
 		drop_x = drop_y = -1;
@@ -664,12 +742,12 @@ static void start_attack(Enemy *e, int kind) {
 		for (int dy = -1; dy <= 1; dy++)
 			for (int dx = -1; dx <= 1; dx++)
 				if (dx || dy) mark(e, e->x + dx, e->y + dy);
-		e->windup = 55;
+		e->windup = SLOW(55);
 		break;
 	case ATK_LINE: { /* 4 tiles towards the player */
 		int dx = px > e->x ? 1 : px < e->x ? -1 : 0, dy = py > e->y ? 1 : py < e->y ? -1 : 0;
 		for (int k = 1; k <= 4; k++) mark(e, e->x + dx * k, e->y + dy * k);
-		e->windup = 65;
+		e->windup = SLOW(65);
 		break;
 	}
 	/* The Unfinished's blows come in two halves: never quite done. */
@@ -679,7 +757,7 @@ static void start_attack(Enemy *e, int kind) {
 		for (int dy = -r; dy <= r; dy++)
 			for (int dx = -r; dx <= r; dx++)
 				if ((dx < 0 ? -dx : dx) == r || (dy < 0 ? -dy : dy) == r) mark(e, e->x + dx, e->y + dy);
-		e->windup = kind == ATK_UNDONE ? 50 : 24;
+		e->windup = SLOW(kind == ATK_UNDONE ? 50 : 24);
 		break;
 	}
 	case ATK_TOMORROW:  /* every other row, yours first... */
@@ -688,13 +766,13 @@ static void start_attack(Enemy *e, int kind) {
 			if (((y ^ py) & 1) == (kind == ATK_TOMORROW2))
 				for (int x = 0; x < grid_n; x++)
 					if (x != e->x || y != e->y) mark(e, x, y);
-		e->windup = kind == ATK_TOMORROW ? 70 : 40;
+		e->windup = SLOW(kind == ATK_TOMORROW ? 70 : 40);
 		break;
 	case ATK_ROPE: {    /* a rope lashed out to the edge */
 		int dx = px - e->x, dy = py - e->y, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
 		int sx = adx >= ady ? (dx > 0 ? 1 : -1) : 0, sy = adx >= ady ? 0 : (dy > 0 ? 1 : -1);
 		for (int k = 1; k < grid_n; k++) mark(e, e->x + sx * k, e->y + sy * k);
-		e->windup = e->hp < BOSS_HP / 2 ? 32 : 44;
+		e->windup = SLOW(e->hp < BOSS_HP / 2 ? 32 : 44);
 		break;
 	}
 	case ATK_UNRAVEL:   /* both diagonals out to the edge... */
@@ -704,14 +782,21 @@ static void start_attack(Enemy *e, int kind) {
 				int sx = kind == ATK_UNRAVEL ? (s & 1 ? 1 : -1) : DX[s], sy = kind == ATK_UNRAVEL ? (s & 2 ? 1 : -1) : DY[s];
 				mark(e, e->x + sx * k, e->y + sy * k);
 			}
-		e->windup = kind == ATK_UNRAVEL ? 56 : 26;
+		e->windup = SLOW(kind == ATK_UNRAVEL ? 56 : 26);
 		break;
 	case ATK_LOOSE:     /* a loose thread where you stand, and around... */
 	case ATK_LOOSE2:    /* ...and again, wherever you went */
 		mark(e, px, py);
 		for (int s = 0; s < 4; s++) mark(e, px + DX[s], py + DY[s]);
-		e->windup = kind == ATK_LOOSE ? 46 : 34;
+		e->windup = SLOW(kind == ATK_LOOSE ? 46 : 34);
 		break;
+	case ATK_GRAB: {    /* its rope, reaching along a line to drag you in */
+		int dx = px - e->x, dy = py - e->y, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+		int sx = adx >= ady ? (dx > 0 ? 1 : -1) : 0, sy = adx >= ady ? 0 : (dy > 0 ? 1 : -1);
+		for (int k = 1; k <= 4; k++) mark(e, e->x + sx * k, e->y + sy * k);
+		e->windup = SLOW(40);
+		break;
+	}
 	case ATK_RING: { /* the bell: across the whole floor from its edge */
 		int dx = e->x == area_x0 ? 1 : e->x == area_x1 ? -1 : 0, dy = dx ? 0 : e->y == area_y0 ? 1 : -1;
 		for (int k = 1; k < grid_n; k++) mark(e, e->x + dx * k, e->y + dy * k);
@@ -723,7 +808,7 @@ static void start_attack(Enemy *e, int kind) {
 			if (k != e->x) mark(e, k, e->y);
 			if (k != e->y) mark(e, e->x, k);
 		}
-		e->windup = 85;
+		e->windup = SLOW(85);
 		break;
 	}
 	e->state = E_WINDUP;
@@ -738,6 +823,15 @@ static void update_enemy(Enemy *e) {
 	if (e->hit_t < 999) e->hit_t++;
 	int px, py;
 	player_tile(&px, &py);
+	/* Facing: towards the soul when idle or waking, the way it walks when
+	 * moving; frozen otherwise (striking, recovering, broken, asleep). */
+	if (e->state == E_IDLE || e->state == E_WAKE || e->state == E_RISE) {
+		int dx = px - e->x, dy = py - e->y, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+		if (adx > ady) e->facing = dx > 0 ? DIR_RIGHT : DIR_LEFT;
+		else if (ady > 0) e->facing = dy > 0 ? DIR_DOWN : DIR_UP;
+	} else if (e->state == E_MOVE && e->t == 1) {
+		e->facing = e->x > e->from_x ? DIR_RIGHT : e->x < e->from_x ? DIR_LEFT : e->y > e->from_y ? DIR_DOWN : DIR_UP;
+	}
 	switch (e->state) {
 	case E_RISE:
 		if (e->t == 1) emit(EV_SPAWN, e->x, e->y);
@@ -769,6 +863,7 @@ static void update_enemy(Enemy *e) {
 			int r = rnd(6);
 			if (cheb <= 2 && r < 3) start_attack(e, ATK_UNDONE);
 			else if (cheb <= 2 && r < 5) start_attack(e, ATK_UNRAVEL);
+			else if ((dx == 0 || dy == 0) && cheb <= 4 && rnd(3) == 0) start_attack(e, ATK_GRAB);
 			else if ((dx == 0 || dy == 0) && rnd(5) < 3) start_attack(e, ATK_ROPE);
 			else if (r < 2) start_attack(e, ATK_LOOSE);
 			else if (cheb > 4 && rnd(2)) {
@@ -830,17 +925,32 @@ static void update_enemy(Enemy *e) {
 		if (e->t >= (e->kind == K_BELL ? BELL_MOVE : e->kind == K_UNFINISHED ? BOSS_MOVE : HUSK_MOVE)) { e->state = E_IDLE; e->t = 0; e->from_x = e->x; e->from_y = e->y; }
 		break;
 	case E_WINDUP:
-		if (e->attack == ATK_RING && e->t % 20 == 1) emit(EV_BELL, e->x, e->y);   /* each toll */
+		if (e->attack == ATK_RING && e->t % (BELL_WINDUP / 4) == 1) emit(EV_BELL, e->x, e->y);   /* each toll */
 		if (e->t >= e->windup) {
 			player_tile(&px, &py);
 			/* Dodged at the last moment from where it lands: time slows, breath back. */
 			if (player.state == P_DODGE && player.t <= PERFECT_FRAMES && inside(player.from_x, player.from_y) &&
 			    e->target[player.from_y * MAX_N + player.from_x]) {
 				player.stamina = player.stamina + PERFECT_STAMINA > STAMINA_MAX * 16 ? STAMINA_MAX * 16 : player.stamina + PERFECT_STAMINA;
+				player.counter_t = COUNTER_FRAMES;   /* and the next blow is a riposte */
 				emit(EV_PERFECT, player.from_x, player.from_y);
 			}
-			if (px >= 0 && py >= 0 && px < MAX_N && py < MAX_N && e->target[py * MAX_N + px])
-				player_hit(e->x, e->y, e->kind == K_UNFINISHED ? BOSS_DAMAGE : HUSK_DAMAGE);
+			int caught = px >= 0 && py >= 0 && px < MAX_N && py < MAX_N && e->target[py * MAX_N + px];
+			if (caught && e->attack == ATK_GRAB) {
+				/* The rope: hurt, and dragged a tile towards it. */
+				int hp0 = player.hp, st0 = player.state;
+				player_hit(e->x, e->y, GRAB_DAMAGE, 0);
+				if (player.hp < hp0 && player.state != P_DEAD && st0 != P_DEAD) {
+					int sx = (e->x > px) - (e->x < px), sy = (e->y > py) - (e->y < py);
+					if ((px + sx != e->x || py + sy != e->y) && enemy_at(px + sx, py + sy) < 0) push_to(px, py, px + sx, py + sy, PUSH_FRAMES * 2);
+					emit(EV_GRAB, px, py);
+				}
+			} else if (caught) {
+				/* The heavy blows knock the soul a tile: the cross, the line,
+				 * the bell's row, all of the Unfinished's. */
+				int push = e->kind == K_UNFINISHED || e->attack == ATK_CROSS || e->attack == ATK_LINE || e->attack == ATK_RING;
+				player_hit(e->x, e->y, e->kind == K_UNFINISHED ? BOSS_DAMAGE : HUSK_DAMAGE, push);
+			}
 			shake_t = shake_t > 3 ? shake_t : 3;
 			emit(EV_SLAM, e->x, e->y);
 			e->state = E_RECOVER;
@@ -874,6 +984,14 @@ int game_telegraph(int x, int y) {
 		if (v > best) best = v;
 	}
 	return best;
+}
+
+int game_telegraph_grab(int x, int y) {
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		const Enemy *e = &enemies[i];
+		if (e->state == E_WINDUP && e->attack == ATK_GRAB && e->target[y * MAX_N + x]) return 1;
+	}
+	return 0;
 }
 
 /* ---- The frame ---------------------------------------------------------------- */

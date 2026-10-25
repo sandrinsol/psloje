@@ -20,7 +20,7 @@
 enum { DIR_UP, DIR_RIGHT, DIR_DOWN, DIR_LEFT };
 
 /* Player states. */
-enum { P_IDLE, P_DODGE, P_ATTACK, P_DRINK, P_CHARGE, P_DEAD, P_WALK, P_JUMP, P_FALL };
+enum { P_IDLE, P_DODGE, P_ATTACK, P_DRINK, P_CHARGE, P_DEAD, P_WALK, P_JUMP, P_FALL, P_PUSH };   /* P_PUSH: knocked a tile (or dragged) */
 
 /* Pad input for one frame. */
 typedef struct {
@@ -41,7 +41,14 @@ typedef struct {
 	int32_t buffer_dir;
 	int32_t dodge_dir;
 	int32_t lock;           /* the enemy faced (R2 picks the next), -1: the nearest */
+	int32_t combo, combo_t; /* the light swing in a chain (0..2), frames since the last one ended */
+	int32_t windup, frames; /* this swing: the frame it hits, its length */
+	int32_t step_t;         /* walking while charging: frames into the (slow) step, 0: none */
+	int32_t rally, rally_t; /* health a blow just took, won back by hitting back for rally_t frames */
+	int32_t counter_t;      /* after a perfect dodge: the next blow is a riposte */
+	int32_t push_frames;    /* how long this push or drag lasts */
 } Player;
+#define RALLY_FRAMES  180
 
 /* Enemy states. */
 enum { E_NONE, E_IDLE, E_MOVE, E_WINDUP, E_RECOVER, E_STAGGER, E_DYING, E_SLEEP, E_WAKE, E_RISE };
@@ -58,23 +65,32 @@ typedef struct {
 	int32_t hp;
 	int32_t windup, attack;     /* this attack's windup and pattern */
 	uint8_t target[MAX_N * MAX_N];  /* tiles the attack will hit */
+	uint8_t facing;             /* DIR_*: frozen while it strikes, recovers or sleeps (its back: a backstab) */
 	int32_t hit_t;              /* frames since hit (flash) */
 	int32_t kind;               /* K_* */
 } Enemy;
 
-/* A walking step, one tile (a dodge is 9 frames). */
-#define WALK_FRAMES   20
-#define DODGE_FRAMES  12   /* a dodge: two tiles (over an enemy too) */
+/* Everything a quarter slower than it first was (heavier, after playing). */
+#define SLOW(f)       ((f) * 5 / 4)
+/* A walking step, one tile. */
+#define WALK_FRAMES   SLOW(20)
+#define DODGE_FRAMES  SLOW(12)   /* a dodge: two tiles (over an enemy too) */
 #define DODGE_TILES   2
-#define IFRAME_FIRST  2    /* invincible frames 2..9 of the dodge */
-#define IFRAME_LAST   9
+#define IFRAME_FIRST  2          /* invincible frames 2..11 of the dodge */
+#define IFRAME_LAST   11
 /* A jump: off the ground (attacks on the floor miss) from AIR_FIRST to
  * AIR_LAST. */
-#define JUMP_FRAMES   28
-#define AIR_FIRST     3
-#define AIR_LAST      21
+#define JUMP_FRAMES   SLOW(28)
+#define AIR_FIRST     4
+#define AIR_LAST      26
 /* Square held this long: the heavy blow is ready. */
-#define CHARGE_FULL   30
+#define CHARGE_FULL   SLOW(30)
+/* Pushed a tile by a heavy blow: no control meanwhile. */
+#define PUSH_FRAMES   12
+/* How long a step takes for each kind (the drawing glides with them). */
+#define HUSK_MOVE     SLOW(36)
+#define BELL_MOVE     SLOW(30)
+#define BOSS_MOVE     SLOW(40)
 
 /* Walked or dodged off the edge: falling, then gone (a death). */
 #define FALL_FRAMES   55
@@ -98,7 +114,7 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL, EV_FALL, EV_CRUMBLE, EV_PERFECT, EV_SPAWN, EV_LOCK, EV_BROKEN, EV_TIRED };   /* hits: v = the damage */   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL, EV_BOSS, EV_TRIAL, EV_FALL, EV_CRUMBLE, EV_PERFECT, EV_SPAWN, EV_LOCK, EV_BROKEN, EV_TIRED, EV_FINISHER, EV_BACKSTAB, EV_GRAB, EV_RALLY };   /* hits: v = the damage */   /* EV_TRIAL: x = the trial met */   /* EV_BOSS: the boss's name is carved */
 typedef struct {
 	int16_t type, x, y;   /* tile */
 	int16_t v;            /* a hit's damage */
@@ -135,6 +151,8 @@ void game_title_tick(void);
 void game_update(const Input *in);
 /* 0..256 how bright tile (x, y)'s telegraph is (0 = none, 256 = about to land). */
 int game_telegraph(int x, int y);
+/* 1 if what's coming down on tile (x, y) is the Unfinished's rope reaching to grab. */
+int game_telegraph_grab(int x, int y);
 /* A slab's state: 0 standing, < 0 crumbling (frames until it falls),
  * > 0 falling (frames since), or gone once out of the area and settled. */
 int game_slab(int x, int y);
