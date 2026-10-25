@@ -9,6 +9,7 @@
 #include <psxpad.h>
 #include "ui.h"
 #include "font.h"
+#include "draw.h"
 
 extern const uint32_t font_small_tim[], font_large_tim[], logo_tim[];
 
@@ -43,18 +44,10 @@ uint16_t settings_map(uint16_t pad) {
 
 /* ---- Drawing --------------------------------------------------------------------------- */
 
-static void load(const uint32_t *t) {
-	TIM_IMAGE tim;
-	GetTimInfo(t, &tim);
-	LoadImage(tim.prect, tim.paddr);
-	if (tim.mode & 8) LoadImage(tim.crect, tim.caddr);
-}
-
 void ui_init(void) {
-	load(font_small_tim);
-	load(font_large_tim);
-	load(logo_tim);
-	DrawSync(0);
+	load_tim(font_small_tim);
+	load_tim(font_large_tim);
+	load_tim(logo_tim);
 	font_tpage[0] = getTPage(0, 0, FONT_TPAGE_X, FONT_TPAGE_Y);
 	font_tpage[1] = getTPage(0, 0, FONT_TPAGE_X, FONT_TPAGE_Y + 256);
 	font_clut = getClut(FONT_CLUT_X, FONT_CLUT_Y);

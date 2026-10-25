@@ -17,13 +17,16 @@ typedef struct {
 
 typedef struct {
 	uint8_t v[4];            /* v[3] = 255: triangle */
-	uint8_t r, g, b;
+	uint8_t r, g, b;         /* textured: a tint, 128 = the texture as is */
 	uint8_t glow;            /* not shaded by the light (eyes) */
+	int8_t mat;              /* MAT_* (figtex.h), MAT_FLAT: plain colour */
+	uint8_t smooth;          /* lit by the vertex normals (rounded) */
 	int16_t nx, ny, nz;      /* outward normal, 4096 = 1 */
 } MFace;
 
 typedef struct {
 	const Vec3 *verts;
+	const Vec3 *normals;     /* per vertex, averaged over its smooth faces */
 	const MFace *faces;
 	int nverts, nfaces;
 	int16_t px, py, pz;      /* pivot */

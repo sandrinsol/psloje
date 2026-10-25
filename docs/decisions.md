@@ -10,7 +10,11 @@ What was decided on top of the [design brief](design-brief.md).
   (it followed the soul at first: changed after playing); your own slab
   flashes red when it's about to be hit.
 - Atmosphere: the soul carries a light, ash / embers fall, the outer ring of
-  the floor breaks away when it's won.
+  the floor breaks away when it's won. Clouds, a distant eye in the sky,
+  lightning.
+- Figures: small textures, Gouraud shaded, real-time lights (sky, the soul's
+  light, flashes from events, telegraph red). Husks shatter into stone; the
+  soul's death: slow motion, its light goes out, colour drains.
 - Hit feel: hit-stop, camera kick, bursts, synthesised sound effects.
 - Tiles do more than telegraphs only on some floors, through their bosses.
 - Glyphs (`tools/makeglyphs.mjs`) only for the HUD.

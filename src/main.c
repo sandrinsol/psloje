@@ -40,7 +40,7 @@ enum { SCREEN_TITLE, SCREEN_GAME };
 volatile int32_t screen = -1;
 volatile uint32_t frame_count;
 volatile uint32_t boot_magic;   /* 0x51D50001 once main() runs: tests wait for it */
-volatile int32_t cpu_usage;
+volatile int32_t cpu_usage, cpu_only;
 volatile int32_t fps;
 
 static uint8_t pad_buffers[2][34];
@@ -104,6 +104,8 @@ static void read_pad(uint16_t *now_out, uint16_t *pressed_out) {
 /* ---- Screens ------------------------------------------------------------------------------ */
 
 static int title_ready;    /* past "PRESS START" */
+static int ticked;         /* the game moved on this frame */
+static int slow_t;         /* the soul fell: slow motion for a while */
 static int pending = UI_NOTHING;   /* waiting for a fade-out to finish */
 static int paused;
 
@@ -124,6 +126,8 @@ static void go_game(void) {
 }
 
 static void update(uint16_t now, uint16_t pressed) {
+	ticked = 0;
+	num_events = 0;   /* this frame's events only, even when the game waits */
 	/* A screen change waits for the fade to black. */
 	if (pending != UI_NOTHING) {
 		if (!fade_done()) return;
@@ -157,9 +161,10 @@ static void update(uint16_t now, uint16_t pressed) {
 		menu_open(MENU_PAUSE);
 		return;
 	}
-	/* Assist: at 3/4 speed every fourth frame waits (inputs carry over). */
+	/* Assist: at 3/4 speed every fourth frame waits (inputs carry over);
+	 * the soul's fall plays at a third. */
 	static uint16_t carried;
-	if (settings.slow && (frame_count & 3) == 3) {
+	if ((settings.slow && (frame_count & 3) == 3) || (slow_t > 0 && slow_t-- % 3)) {
 		carried |= pressed;
 		return;
 	}
@@ -167,6 +172,9 @@ static void update(uint16_t now, uint16_t pressed) {
 	carried = 0;
 	parry_wide = settings.parry_wide;
 	game_update(&in);
+	ticked = 1;
+	for (int i = 0; i < num_events; i++)
+		if (game_events[i].type == EV_DEATH) slow_t = 90;
 	audio_events();
 }
 
@@ -184,7 +192,7 @@ int main(int argc, const char **argv) {
 
 		ClearOTagR(b->ot, OT_LEN);
 		uint8_t *prim = b->prims, *end = b->prims + PRIM_LEN - 1024;
-		if (screen == SCREEN_GAME) prim = draw_frame(b->ot, prim, end, frame_count);
+		if (screen == SCREEN_GAME) prim = draw_frame(b->ot, prim, end, frame_count, ticked);
 		ui_begin(b->ot, prim, end);
 		fade_draw();   /* first in the top slot: over everything */
 		if (screen == SCREEN_TITLE) {
@@ -206,8 +214,9 @@ int main(int argc, const char **argv) {
 			fps_start = vnow;
 		}
 
+		cpu_only = (TIMER_VALUE(1) * 100) / 263;    /* building the frame */
 		DrawSync(0);
-		cpu_usage = (TIMER_VALUE(1) * 100) / 263;   /* one frame: 263 lines */
+		cpu_usage = (TIMER_VALUE(1) * 100) / 263;   /* ... and the GPU done with the last: one frame is 263 lines */
 		VSync(0);
 		TIMER_VALUE(1) = 0;
 		PutDispEnv(&b->disp);

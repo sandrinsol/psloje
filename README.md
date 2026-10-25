@@ -10,7 +10,12 @@ stone, 640 x 480), menus (pause, options with volume, a wider parry window
 and a slower game speed as assists, button remapping, credits), a carved
 stone HUD in the game's own serif lettering, fades and a slow zoom onto the
 floor as it begins. The 9 x 9 floor of Sloth: carved rune
-slabs floating over a sea of ash, sunken statues in the haze, ash falling.
+slabs floating over a sea of ash, sunken statues in the haze, ash falling,
+clouds drifting, a great eye watching from the sky, lightning now and then.
+The figures are textured and lit by the GTE: the sky, the soul's light,
+flashes from parries and hits, the red of a telegraph under them; soft round
+shadows. Killed husks shatter into stone and embers; when the soul falls the
+game slows, its light goes out and the colour drains away.
 A fixed camera looks at the whole floor from the south, high and tilted. Three waves of husks raise
 their arms over their heads, and the runes of the slabs they're about to
 hit glow, then burn (your own slab flashes red). Walk with the D-pad, dodge with
@@ -27,13 +32,13 @@ synthesised sound effects. When the floor is won its outer ring breaks away.
 | Circle + direction | Dodge that way (invincible frames, stamina) | arrow + Z |
 | Circle | Dodge away from the enemy you face | Z |
 | (automatic) | Face the nearest enemy, along a row or column | |
-| Start | Pause (options, return to title) | Enter |
-
-The action buttons can be changed in Options > Controls.
 | X | Attack (sword: the tile in front) | X |
 | Square | Block; press just before a hit to parry | S |
 | Triangle | Drink a flask | A |
 | X (when judged) | Rise again | X |
+| Start | Pause (options, return to title) | Enter |
+
+The action buttons can be changed in Options > Controls.
 
 ## Play it
 
@@ -51,7 +56,8 @@ Needs PSn00bSDK (see `.devcontainer/install-psn00bsdk.sh`) and Node.js:
 Generated assets (committed; rerun after changing them):
 `node tools/makeglyphs.mjs` (HUD glyphs), `python3 tools/makefont.py`
 (lettering and the logo, from Liberation Serif, see docs/credits.md), `node tools/makeslabs.mjs` (the
-floor's rune slabs and their glow colours), `node tools/makesfx.mjs` (sound
+floor's rune slabs and their glow colours), `node tools/makefigtex.mjs`
+(textures for the figures, clouds, the eye, stone chunks, glows), `node tools/makesfx.mjs` (sound
 effects, synthesised and encoded as SPU ADPCM).
 
 ## Code
@@ -59,11 +65,13 @@ effects, synthesised and encoded as SPU ADPCM).
 - `src/game.c`: the rules: player (turning, dodges, sword, block and parry,
   stamina, flasks), husks (moving, telegraphed slam / line / cross attacks,
   stagger), waves, death and the absolution drop.
-- `src/draw.c`: the 3D scene: the fixed camera, the slabs (soul light,
-  telegraph glow, fog, the crumbling ring), statues, figures through the GTE,
-  ash and bursts, the HUD.
+- `src/draw.c`: the 3D scene: the fixed camera, the sky (clouds, the eye,
+  lightning), the slabs (soul light, flashes, telegraph glow, fog, the
+  crumbling ring), statues, textured figures lit by the GTE, shadows, ash,
+  sparks and stone chunks, the death's grading, the HUD.
 - `src/models.c`: the soul, the husk and the statues, built from boxes,
-  prisms and cones and posed by turning their parts.
+  prisms and cones (materials, rounded normals) and posed by turning their
+  parts.
 - `src/audio.c`: sound effects on SPU voices, from game events.
 - `src/ui.c`: lettering, carved panels, fades, the title screen and the
   menus, settings and button mapping.
