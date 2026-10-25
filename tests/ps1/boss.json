@@ -20,6 +20,7 @@
     {"name": "the Unfinished rises", "waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 4}, "maxFrames": 60},
     {"assertRam": "enemies+124", "as": "s32", "equals": 3},
     {"waitUntil": {"address": "floor_t", "as": "s32", "op": "gte", "value": 230}, "maxFrames": 400},
+    {"wait": 2},
     {"name": "its name carved", "assert": "goldens/boss_intro.png"},
     {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 200},
     {"assertRam": "enemies+24", "as": "s32", "equals": 400},

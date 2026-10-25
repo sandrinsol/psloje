@@ -319,6 +319,8 @@ static const char *button_name(uint16_t b) {
 	return "?";
 }
 
+const char *action_button(int action) { return button_name(settings.keys[action]); }
+
 int menu_update(uint16_t held, uint16_t pressed) {
 	(void)held;
 	menu_t++;

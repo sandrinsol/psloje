@@ -1076,6 +1076,8 @@ static void draw_hud(int frame) {
 	char line[48];
 	const Player *p = &player;
 	ui_begin(ot, prim, prim_end);
+	/* The boss's entrance is a scene of its own: no HUD over the letterbox. */
+	if (floor_state == F_BOSS_INTRO) goto scene;
 	panel(6, 5, 148, 25, 1);
 	bar(11, 9, 100, 7, p->hp, HP_MAX, 200, 36, 30, 0);
 	bar(11, 19, 100, 6, p->stamina, STAMINA_MAX * 16, 150, 170, 80, 0);
@@ -1093,6 +1095,7 @@ static void draw_hud(int frame) {
 		sprintf(line, "WAVE %s", ROMAN[wave < 3 ? wave : 2]);
 		text(202, 11, line, FONT_SMALL, 170, 160, 150, 1, 0);
 	}
+scene:
 	if (hud_quiet) { prim = ui_end(); return; }
 	/* The boss: letterbox bars and its name carved, then its life along
 	 * the bottom. */
@@ -1107,8 +1110,12 @@ static void draw_hud(int frame) {
 			for (int i = 0; i < n; i++) shown[i] = NAME[i];
 			shown[n] = 0;
 			int fade = t > BOSS_INTRO - 40 ? (BOSS_INTRO - t) * 6 : 240;
-			dark_box(0, 166, 320, 36, fade / 2, 2);
-			text(160 - text_width(NAME, FONT_LARGE) / 2, 170, shown, FONT_LARGE, fade, fade * 3 / 4, fade / 2, 0, 0);
+			/* Gone as the bars draw back (dimmed further, it would turn to
+			 * black letters over the floor). */
+			if (fade > 90) {
+				dark_box(0, 166, 320, 36, fade / 2, 2);
+				text(160 - text_width(NAME, FONT_LARGE) / 2, 170, shown, FONT_LARGE, fade, fade * 3 / 4, fade / 2, 0, 0);
+			}
 		}
 	}
 	if (banner_t > 0) {
@@ -1133,7 +1140,10 @@ static void draw_hud(int frame) {
 		text(160, y + (big ? 5 : 6), message, big ? FONT_LARGE : FONT_SMALL, dead ? 210 : 220, dead ? 50 : 200, dead ? 40 : 160, 1, 0);
 	}
 	if (floor_state == F_DEAD) {
-		if (floor_t > 90 && (game_frames & 32)) text(160, 122, "PRESS CROSS TO RISE AGAIN", FONT_SMALL, 200, 190, 180, 1, 0);
+		if (floor_t > 90 && (game_frames & 32)) {
+			sprintf(line, "PRESS %s TO RISE AGAIN", action_button(ACT_JUMP));
+			text(160, 122, line, FONT_SMALL, 200, 190, 180, 1, 0);
+		}
 		sprintf(line, "GUILT %d", guilt + 1);
 		text(160, 141, line, FONT_SMALL, 150, 120, 110, 1, 0);
 	}
