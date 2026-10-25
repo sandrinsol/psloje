@@ -19,3 +19,6 @@ void draw_void_colour(Colour *c);
 /* Set while paused: the HUD keeps to its panels (no messages over the menu). */
 extern int hud_quiet;
 uint8_t *draw_frame(uint32_t *ot, uint8_t *prim, uint8_t *end, int frame, int ticked);
+/* Behind the title (640 x 480): the floor, the soul standing under the
+ * eye, the camera drifting slowly round; no HUD. */
+uint8_t *draw_title_scene(uint32_t *ot, uint8_t *prim, uint8_t *end, int frame);

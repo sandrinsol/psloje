@@ -1,6 +1,6 @@
 /*
  * Saving to the memory card in slot 1. The card is spoken to directly, a
- * 128-byte frame at a time over the controller port (the BIOS's file calls
+ * 128-byte frame at a time over the controller port (sio.c; the BIOS's file calls
  * misbehave in emulators), keeping to the card's own layout: block 0 holds
  * the directory, a save is one 8 KB block that starts with the header the
  * console's card manager shows (title in Shift-JIS, a 16-colour icon: a
@@ -13,6 +13,7 @@
 #include <psxpad.h>
 #include <hwregs_c.h>
 #include "save.h"
+#include "sio.h"
 #include "ui.h"
 
 #define FILE_NAME  "BESLES-99999GRIDSOUL"   /* at most 20 characters */
@@ -76,63 +77,34 @@ static void sjis_title(uint8_t *out, const char *s) {
 
 /* ---- The card, a frame at a time ---------------------------------------------------- */
 
-/* One byte each way; waits for the card's acknowledge unless it's the last. */
-static int xfer(int b, int ack) {
-	int t = 0;
-	while (!(SIO_STAT(0) & 1)) if (++t > 20000) return -1;   /* ready to send */
-	SIO_DATA(0) = b;
-	t = 0;
-	while (!(SIO_STAT(0) & 2)) if (++t > 20000) return -1;   /* a byte back */
-	int r = SIO_DATA(0);
-	if (ack) {
-		t = 0;
-		while (!(SIO_STAT(0) & 0x200)) if (++t > 4000) return -2;   /* the card's /ACK */
-		SIO_CTRL(0) |= 0x0010;
-		IRQ_STAT = ~(1 << 7);
-	}
-	return r;
-}
-
-static void select_card(void) {
-	SIO_MODE(0) = 0x000d;
-	SIO_BAUD(0) = 0x0088;
-	SIO_CTRL(0) = 0x1003;   /* port 1 selected, sending, /ACK raises a flag */
-	for (volatile int i = 0; i < 400; i++);
-}
-
-static void deselect(void) {
-	SIO_CTRL(0) = 0;
-	for (volatile int i = 0; i < 400; i++);
-}
-
 static int read_frame(int sector, uint8_t *buf) {
-	select_card();
-	int ok = xfer(0x81, 1) >= 0 && xfer('R', 1) >= 0 && xfer(0, 1) == 0x5a && xfer(0, 1) == 0x5d &&
-	         xfer(sector >> 8, 1) >= 0 && xfer(sector & 0xff, 1) >= 0 &&
-	         xfer(0, 1) == 0x5c && xfer(0, 1) == 0x5d && xfer(0, 1) == (sector >> 8) && xfer(0, 1) == (sector & 0xff);
+	sio_select();
+	int ok = sio_xfer(0x81, 1) >= 0 && sio_xfer('R', 1) >= 0 && sio_xfer(0, 1) == 0x5a && sio_xfer(0, 1) == 0x5d &&
+	         sio_xfer(sector >> 8, 1) >= 0 && sio_xfer(sector & 0xff, 1) >= 0 &&
+	         sio_xfer(0, 1) == 0x5c && sio_xfer(0, 1) == 0x5d && sio_xfer(0, 1) == (sector >> 8) && sio_xfer(0, 1) == (sector & 0xff);
 	int chk = (sector >> 8) ^ (sector & 0xff);
 	for (int i = 0; ok && i < 128; i++) {
-		int v = xfer(0, 1);
+		int v = sio_xfer(0, 1);
 		if (v < 0) ok = 0;
 		buf[i] = v;
 		chk ^= v;
 	}
-	ok = ok && xfer(0, 1) == chk && xfer(0, 0) == 'G';
-	deselect();
+	ok = ok && sio_xfer(0, 1) == chk && sio_xfer(0, 0) == 'G';
+	sio_deselect();
 	return ok;
 }
 
 static int write_frame(int sector, const uint8_t *buf) {
-	select_card();
-	int ok = xfer(0x81, 1) >= 0 && xfer('W', 1) >= 0 && xfer(0, 1) == 0x5a && xfer(0, 1) == 0x5d &&
-	         xfer(sector >> 8, 1) >= 0 && xfer(sector & 0xff, 1) >= 0;
+	sio_select();
+	int ok = sio_xfer(0x81, 1) >= 0 && sio_xfer('W', 1) >= 0 && sio_xfer(0, 1) == 0x5a && sio_xfer(0, 1) == 0x5d &&
+	         sio_xfer(sector >> 8, 1) >= 0 && sio_xfer(sector & 0xff, 1) >= 0;
 	int chk = (sector >> 8) ^ (sector & 0xff);
 	for (int i = 0; ok && i < 128; i++) {
-		if (xfer(buf[i], 1) < 0) ok = 0;
+		if (sio_xfer(buf[i], 1) < 0) ok = 0;
 		chk ^= buf[i];
 	}
-	ok = ok && xfer(chk, 1) >= 0 && xfer(0, 1) == 0x5c && xfer(0, 1) == 0x5d && xfer(0, 0) == 'G';
-	deselect();
+	ok = ok && sio_xfer(chk, 1) >= 0 && sio_xfer(0, 1) == 0x5c && sio_xfer(0, 1) == 0x5d && sio_xfer(0, 0) == 'G';
+	sio_deselect();
 	return ok;
 }
 
@@ -175,12 +147,9 @@ static int find_block(int *fresh) {
 
 int save_load(void) {
 	int fresh, b;
-	StopPAD();
 	b = find_block(&fresh);
 	int ok = b && !fresh;
 	for (int i = 0; ok && i < 8; i++) ok = read_frame3(b * 64 + i, block + i * 128);   /* the header and our data */
-	StartPAD();
-	ChangeClearPAD(0);
 	if (!ok) { save_state = -1; return 0; }
 	SaveData d;
 	memcpy(&d, block + 0x200, sizeof(d));
@@ -211,7 +180,6 @@ int save_write(void) {
 	d.sum = checksum(&d);
 	memcpy(block + 0x200, &d, sizeof(d));
 
-	StopPAD();
 	int fresh, bl = find_block(&fresh), ok = bl != 0;
 	if (ok && fresh) {
 		/* Its directory entry: in use, one block, the last of its file. */
@@ -228,8 +196,6 @@ int save_write(void) {
 	 * unused); the header (title, icon) once, when the save is made. */
 	for (int i = fresh ? 0 : 0x200 / 128; ok && i < 8; i++) ok = write_frame3(bl * 64 + i, block + i * 128);
 	if (ok && fresh) known_block = bl;
-	StartPAD();
-	ChangeClearPAD(0);
 	save_state = ok ? 2 : -1;
 	return ok;
 }

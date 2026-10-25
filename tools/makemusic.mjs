@@ -124,6 +124,23 @@ function swell() {
   return out;
 }
 
+// Wind and thin rain over the floor, a seamless loop: low rushing noise in
+// slow gusts (whole cycles of the loop), a fine hiss, now and then a drop.
+function wind() {
+  const L = 28 * 3150, fade = 4000, n = L + fade, raw = new Float64Array(n);
+  let lo = 0, lo2 = 0, hi = 0;
+  for (let i = 0; i < n; i++) {
+    const x = noise();
+    lo += (x - lo) * 0.02; lo2 += (lo - lo2) * 0.05;   // the wind: twice low-passed
+    hi += (x - hi) * 0.5;                               // the rain: what's left above
+    const t = (i % L) / L, gust = 0.55 + 0.3 * Math.sin(2 * Math.PI * 2 * t) + 0.15 * Math.sin(2 * Math.PI * 5 * t + 1);
+    raw[i] = lo2 * 9 * gust + (x - hi) * 0.18 + (noise() > 0.9993 ? noise() * 0.6 : 0);
+  }
+  const out = new Float64Array(L);   // the end faded into the start: no seam
+  for (let i = 0; i < L; i++) out[i] = i < fade ? raw[i] * (i / fade) + raw[L + i] * (1 - i / fade) : raw[i];
+  return out;
+}
+
 // name: [samples, loop, base MIDI note, ADSR1, ADSR2]. ADSR (SPU): attack
 // rate << 8 | sustain level 15; release shift | exponential.
 const ADSR1 = (ar) => (ar << 8) | 0x000f;
@@ -138,8 +155,9 @@ const INSTRUMENTS = {
   WHISPER: [whisper, false, 60, ADSR1(0), ADSR2(14)],
   SIGH: [sigh, false, 60, ADSR1(0), ADSR2(14)],
   SWELL: [swell, false, 57, ADSR1(0), ADSR2(16)],
+  WIND: [wind, true, 60, ADSR1(64), ADSR2(18)],
 };
-const PEAK = { WHISPER: 0.7, SIGH: 0.75, PULSE: 0.9, DRUM: 0.95 };
+const PEAK = { WHISPER: 0.7, SIGH: 0.75, PULSE: 0.9, DRUM: 0.95, WIND: 0.6 };
 const normalise = (x, peak) => { let m = 0; for (const v of x) m = Math.max(m, Math.abs(v)); return Array.from(x, (v) => v * peak / (m || 1)); };
 
 // ---- Songs ---------------------------------------------------------------------------------

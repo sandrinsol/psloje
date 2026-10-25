@@ -106,6 +106,19 @@ husk; any hit on a broken husk is a riposte, 3x damage.
 - Flasks: 3 a floor, refilled when it restarts.
 - Guilt (deaths) changes the story and endings only, not the difficulty.
 
+## Title, rumble, ambience
+- Behind the title (640 x 480): the floor in 3D under the eye, the soul
+  standing to one side, the camera drifting slowly; ash falling over it.
+- Rumble: the pad is read directly (pad.c, not the BIOS) so a DualShock's
+  motors can run: hits taken, heavy blows, ripostes, kills, the edge falling,
+  the soul falling, the boss's entrance and slams, a buzz on a perfect
+  dodge. VIBRATION on/off in Options (saved).
+- Wind and thin rain under the music while on the floor (a looped
+  instrument on its own voice). At 30 health or less a heartbeat, quicker
+  as it falls, and the music pulled back.
+- Continue (from the last floor reached) waits for there to be more than
+  one floor.
+
 ## Story and sound
 - Backstory and the 7 memories: drafted by Claude, approved by the author.
 - Memories between floors: text appearing over a still glyph picture.

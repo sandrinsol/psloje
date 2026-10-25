@@ -143,6 +143,14 @@ void music_update(void) {
 	}
 }
 
+#define AMBIENCE_VOICE 5
+void music_ambience(int on) {
+	static int playing;
+	if (on && !playing) key_on(AMBIENCE_VOICE, INST_WIND, 60, 0x0c00 * settings.sound / 10, 0);
+	if (!on && playing) SpuSetKey(0, 1 << AMBIENCE_VOICE);   /* it dies away (its release) */
+	playing = on;
+}
+
 void music_note(int slot, int inst, int note, int vol, int pan) {
 	key_on(FIRST_VOICE + (slot & (MAX_TRACKS - 1)), inst, note, vol * settings.music / 10, pan);
 }

@@ -16,6 +16,8 @@ void music_update(void);
 /* A one-shot voice (whisper, sigh, choir swell) on a sound-effect voice:
  * vol 0..0x3fff, pan -64..64. */
 void music_voice(int inst, int note, int vol, int pan);
+/* The wind and rain over the floor, under the music (on its own voice). */
+void music_ambience(int on);
 /* One note on the music's own voices, while no song plays (the studio's
  * chord): slot 0..15. */
 void music_note(int slot, int inst, int note, int vol, int pan);

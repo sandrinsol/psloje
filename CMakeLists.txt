@@ -20,7 +20,7 @@ project(
 	DESCRIPTION "GRID SOULS"
 )
 
-psn00bsdk_add_executable(game GPREL src/main.c src/game.c src/draw.c src/models.c src/audio.c src/ui.c src/anim.c src/music.c src/save.c)
+psn00bsdk_add_executable(game GPREL src/main.c src/game.c src/draw.c src/models.c src/audio.c src/ui.c src/anim.c src/music.c src/save.c src/sio.c src/pad.c)
 target_compile_options(game PRIVATE -O2 -Wall -Wno-unused-function -Wno-unused-value)
 # Debian/Ubuntu's mipsel-linux-gnu libgcc is built for MIPS32r2 with hard-float
 # helpers, which the PS1 can't run. Link libmips1rt (64-bit maths and soft-float

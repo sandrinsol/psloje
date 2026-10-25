@@ -128,6 +128,10 @@ enum {
 extern uint32_t trials;   /* bits met so far (set from the save) */
 
 void game_start_floor(int keep_drop);
+/* The floor as the title shows it: the soul alone in the middle, facing
+ * the camera. Then once a frame, to keep it breathing. */
+void game_title_scene(void);
+void game_title_tick(void);
 void game_update(const Input *in);
 /* 0..256 how bright tile (x, y)'s telegraph is (0 = none, 256 = about to land). */
 int game_telegraph(int x, int y);
