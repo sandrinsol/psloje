@@ -19,6 +19,7 @@
 #include "game.h"
 #include "glyphs.h"
 #include "models.h"
+#include "anim.h"
 #include "slabs.h"
 #include "ui.h"
 
@@ -588,17 +589,26 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 	for (int r = 0; r < 3; r++) for (int c = 0; c < 3; c++) cr.m[r][c] = cam.m[r][c];
 	rot_make(pose ? pose->lean : 0, yaw, &obj);
 	int dy = pose ? pose->dy : 0;
+	/* Each part's turn and where its origin lands, built on its parent's
+	 * (parents come first): rot = parent * own, origin = parent rot *
+	 * (pivot - own * pivot) + parent origin. */
+	Rot prot[MAX_PARTS];
+	int poff[MAX_PARTS][3];
 	for (int pi = 0; pi < m->nparts; pi++) {
 		const Part *pt = &m->parts[pi];
-		Rot prt, world, full;
+		Rot prt, full;
 		rot_make(pose ? pose->pitch[pi] : 0, pose ? pose->yaw[pi] : 0, &prt);
-		rot_mul(&obj, &prt, &world);            /* part -> world rotation */
-		rot_mul(&cr, &world, &full);            /* part -> camera */
-		/* Where the part's origin lands: obj * (pivot - prt * pivot) + position. */
+		const Rot *up = pt->parent < 0 ? &obj : &prot[pt->parent];
+		int base[3] = { wx, wy + dy, wz };
+		const int *uo = pt->parent < 0 ? base : poff[pt->parent];
+		rot_mul(up, &prt, &prot[pi]);           /* part -> world rotation */
+		const Rot *world_r = &prot[pi];
+		rot_mul(&cr, world_r, &full);           /* part -> camera */
 		int qx, qy, qz, ox, oy, oz;
 		rot_apply(&prt, pt->px, pt->py, pt->pz, &qx, &qy, &qz);
-		rot_apply(&obj, pt->px - qx, pt->py - qy, pt->pz - qz, &ox, &oy, &oz);
-		ox += wx; oy += wy + dy; oz += wz;
+		rot_apply(up, pt->px - qx, pt->py - qy, pt->pz - qz, &ox, &oy, &oz);
+		ox += uo[0]; oy += uo[1]; oz += uo[2];
+		poff[pi][0] = ox; poff[pi][1] = oy; poff[pi][2] = oz;
 		MATRIX g;
 		for (int r = 0; r < 3; r++) {
 			for (int c = 0; c < 3; c++) g.m[r][c] = full.m[r][c];
@@ -608,7 +618,7 @@ static void draw_model(const Model *m, const Pose *pose, int wx, int wy, int wz,
 		MATRIX lm;
 		for (int l = 0; l < 3; l++)
 			for (int c = 0; c < 3; c++)
-				lm.m[l][c] = (world.m[0][c] * fig_dir[l][0] + world.m[1][c] * fig_dir[l][1] + world.m[2][c] * fig_dir[l][2]) >> 12;
+				lm.m[l][c] = (world_r->m[0][c] * fig_dir[l][0] + world_r->m[1][c] * fig_dir[l][1] + world_r->m[2][c] * fig_dir[l][2]) >> 12;
 		load_light_matrix(&lm);
 		load_matrix(&g);
 		int nverts = pt->nverts < 64 ? pt->nverts : 64;
@@ -1086,102 +1096,83 @@ static void draw_hud(int frame) {
 
 /* ---- Poses ----------------------------------------------------------------------------- */
 
-static int lerp(int a, int b, int t, int n) {
-	if (t <= 0) return a;
-	if (t >= n) return b;
-	return a + (b - a) * t / n;
+/* Smoothstep, k 0..256. */
+static int ease256(int k) {
+	if (k <= 0) return 0;
+	if (k >= 256) return 256;
+	return k * k * (768 - 2 * k) >> 16;
 }
+
+/* A figure's animation: what it's playing, and the pose it was in when that
+ * started, blended out over the first frames. */
+typedef struct {
+	int anim, state;
+	int since;   /* frames since it changed */
+	Pose from, last;
+} Animator;
+
+#define BLEND_FRAMES 6
+
+/* t: frames into the animation (the game's own timers, so hit-stop freezes
+ * it); blend: frames to blend in from the previous pose. */
+static void animate(Animator *an, int state, int anim, int t, int len, int blend, Pose *out) {
+	if (state != an->state || anim != an->anim) {
+		an->from = an->last;
+		an->since = an->state < 0 ? 999 : 0;   /* first sight: no blend */
+		an->state = state;
+		an->anim = anim;
+	}
+	anim_sample(anim, t, len, out);
+	if (an->since < blend) pose_blend(&an->from, out, ease256(an->since * 256 / blend), out);
+	if (an->since < 999) an->since++;
+	an->last = *out;
+}
+
+static Animator soul_anim = { -1, -1 };
 
 static void soul_pose(Pose *ps) {
 	const Player *p = &player;
-	*ps = (Pose){ { 0, 380, 120 }, { 0, -120, 0 }, 0, 0 };
-	int breathe = isin((game_frames * 40) & 4095) >> 10;
-	ps->dy = breathe;
 	switch (p->state) {
-	case P_CHARGE: {
-		/* The sword drawn back over the shoulder; shaking once it's ready. */
-		ps->pitch[SOUL_SWORD_ARM] = lerp(380, -2300, p->t, CHARGE_FULL);
-		ps->yaw[SOUL_SWORD_ARM] = lerp(-120, -500, p->t, CHARGE_FULL);
-		ps->lean = lerp(0, -200, p->t, CHARGE_FULL);
-		ps->dy = lerp(0, 10, p->t, CHARGE_FULL);
-		if (p->t >= CHARGE_FULL && (game_frames & 2)) ps->pitch[SOUL_SWORD_ARM] += 60;
+	case P_WALK:   animate(&soul_anim, P_WALK, A_SOUL_WALK, p->t, WALK_FRAMES, BLEND_FRAMES, ps); break;
+	case P_DODGE:  animate(&soul_anim, P_DODGE, A_SOUL_DODGE, p->t, 9, 2, ps); break;
+	case P_JUMP:   animate(&soul_anim, P_JUMP, A_SOUL_JUMP, p->t, JUMP_FRAMES, 3, ps); break;
+	case P_CHARGE:
+		animate(&soul_anim, P_CHARGE, A_SOUL_CHARGE, p->t, CHARGE_FULL, 3, ps);
+		if (p->t >= CHARGE_FULL && (game_frames & 2)) ps->pitch[SOUL_SWORD_ARM] += 60;   /* straining */
 		break;
-	}
 	case P_ATTACK:
-		if (p->heavy) {
-			/* From over the shoulder, all the way down. */
-			if (p->t < 6) { ps->pitch[SOUL_SWORD_ARM] = lerp(-2300, 1700, p->t - 3, 3); ps->yaw[SOUL_SWORD_ARM] = lerp(-500, 300, p->t - 3, 3); ps->lean = lerp(-200, 400, p->t - 3, 3); }
-			else { ps->pitch[SOUL_SWORD_ARM] = lerp(1700, 380, p->t - 12, 16); ps->lean = lerp(400, 0, p->t - 12, 16); ps->dy = lerp(14, 0, p->t - 6, 10); }
-			break;
-		}
-		if (p->t < 8) { ps->pitch[SOUL_SWORD_ARM] = lerp(380, -1500, p->t, 6); ps->lean = lerp(0, -120, p->t, 6); }
-		else { ps->pitch[SOUL_SWORD_ARM] = lerp(-1500, 1300, p->t - 8, 3); ps->yaw[SOUL_SWORD_ARM] = lerp(-300, 300, p->t - 8, 4); ps->lean = lerp(-120, 220, p->t - 8, 3); }
-		if (p->t > 14) { ps->pitch[SOUL_SWORD_ARM] = lerp(1300, 380, p->t - 14, 8); ps->lean = lerp(220, 0, p->t - 14, 8); }
+		if (p->heavy) animate(&soul_anim, P_ATTACK + 100, A_SOUL_HEAVY, p->t, 30, 0, ps);
+		else animate(&soul_anim, P_ATTACK, A_SOUL_ATTACK, p->t, 22, 2, ps);
 		break;
-	case P_WALK:
-		ps->dy = -(isin(p->t * 2048 / WALK_FRAMES) >> 9);   /* a small bob */
-		ps->pitch[SOUL_ARM] = 120 + (isin(p->t * 4096 / WALK_FRAMES) >> 3);
-		break;
-	case P_DODGE:
-		ps->lean = 500; ps->dy = 30 - (p->t - 4) * (p->t - 4) * 2;
-		ps->pitch[SOUL_SWORD_ARM] = 900; ps->pitch[SOUL_ARM] = 900;
-		break;
-	case P_DRINK:
-		ps->pitch[SOUL_ARM] = lerp(120, 2300, p->t, 12);
-		break;
-	case P_JUMP: {
-		/* Crouch, up, down, crouch. */
-		int air = AIR_LAST - AIR_FIRST + 1, t = p->t - AIR_FIRST;
-		if (t < 0 || t >= air) ps->dy = 14;
-		else ps->dy = -(150 * isin(t * 2048 / air) >> 12);
-		ps->pitch[SOUL_ARM] = t >= 0 && t < air ? -600 : 300;
-		ps->pitch[SOUL_SWORD_ARM] = t >= 0 && t < air ? -300 : 380;
-		ps->lean = t >= 0 && t < air ? -80 : 120;
-		break;
+	case P_DRINK:  animate(&soul_anim, P_DRINK, A_SOUL_DRINK, p->t, 45, BLEND_FRAMES, ps); break;
+	case P_DEAD:   animate(&soul_anim, P_DEAD, A_SOUL_DEAD, p->t, 60, 4, ps); break;
+	default:       animate(&soul_anim, P_IDLE, A_SOUL_IDLE, game_frames, 120, BLEND_FRAMES, ps); break;
 	}
-	case P_DEAD:
-		ps->lean = lerp(0, 1000, p->t, 30); ps->dy = lerp(0, 30, p->t, 30);
-		break;
+	/* Flinch when hit. */
+	if (p->hurt_t < 8 && p->state != P_DEAD) {
+		int k = 8 - p->hurt_t;
+		ps->lean -= k * 25;
+		ps->pitch[SOUL_HEAD] -= k * 30;
 	}
 }
 
-static void husk_pose(const Enemy *e, Pose *ps) {
-	*ps = (Pose){ { 260, 0, 0 }, { 0, 0, 0 }, 0, 0 };
-	ps->dy = isin((game_frames * 24 + (int)(e - enemies) * 900) & 4095) >> 9;
+static Animator husk_anim[MAX_ENEMIES];
+
+static void husk_pose(int i, Pose *ps) {
+	const Enemy *e = &enemies[i];
+	Animator *an = &husk_anim[i];
+	int phase = i * 37;   /* not all breathing together */
 	switch (e->state) {
-	case E_MOVE:
-		ps->pitch[HUSK_BODY] = 300 + (isin(e->t * 4096 / 36) >> 6);
-		ps->pitch[HUSK_RIGHT_ARM] = isin(e->t * 4096 / 36) >> 4;
-		ps->pitch[HUSK_LEFT_ARM] = -(isin(e->t * 4096 / 36) >> 4);
-		ps->dy = -(isin(e->t * 2048 / 36) >> 8);
+	case E_MOVE:    animate(an, E_MOVE, A_HUSK_MOVE, e->t, 36, BLEND_FRAMES, ps); break;
+	case E_WINDUP:
+		animate(an, E_WINDUP, A_HUSK_WINDUP, e->t, e->windup, 8, ps);
+		if (e->attack == 2) { ps->yaw[HUSK_RIGHT_ARM] += 600; ps->yaw[HUSK_LEFT_ARM] -= 600; }   /* the cross: arms spread */
+		if (e->t > e->windup - 15) ps->dy += (game_frames & 2) ? -2 : 2;                        /* about to fall */
 		break;
-	case E_WINDUP: {
-		/* Arms rise over the head, it straightens and leans back. */
-		int t = e->t, w = e->windup;
-		int arm = lerp(0, -2500, t, w - 8);
-		ps->pitch[HUSK_RIGHT_ARM] = arm; ps->pitch[HUSK_LEFT_ARM] = arm;
-		ps->pitch[HUSK_BODY] = lerp(260, -150, t, w - 8);
-		if (t > w - 15) ps->dy = (game_frames & 2) ? -2 : 2;
-		if (e->attack == 2) { ps->yaw[HUSK_RIGHT_ARM] = 600; ps->yaw[HUSK_LEFT_ARM] = -600; }
-		break;
-	}
-	case E_RECOVER: {
-		int t = e->t;
-		int arm = lerp(700, 0, t - 6, 30);
-		ps->pitch[HUSK_RIGHT_ARM] = arm; ps->pitch[HUSK_LEFT_ARM] = arm;
-		ps->pitch[HUSK_BODY] = lerp(600, 260, t - 6, 30);
-		ps->dy = t < 6 ? 12 : 0;
-		break;
-	}
-	case E_STAGGER:
-		ps->pitch[HUSK_BODY] = -350;
-		ps->pitch[HUSK_RIGHT_ARM] = -400 + ((game_frames & 8) ? 100 : 0);
-		ps->pitch[HUSK_LEFT_ARM] = -500;
-		break;
-	case E_DYING:
-		ps->dy = e->t * 6;
-		ps->pitch[HUSK_BODY] = 260 + e->t * 20;
-		break;
+	case E_RECOVER: animate(an, E_RECOVER, A_HUSK_RECOVER, e->t, 50, 2, ps); break;
+	case E_STAGGER: animate(an, E_STAGGER, A_HUSK_STAGGER, e->t, 30, 4, ps); break;
+	case E_DYING:   *ps = an->last; break;
+	default:        animate(an, E_IDLE, A_HUSK_IDLE, game_frames + phase, 100, BLEND_FRAMES, ps); break;
 	}
 }
 
@@ -1294,7 +1285,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 	/* The husks. */
 	for (int i = 0; i < MAX_ENEMIES; i++) {
 		const Enemy *e = &enemies[i];
-		if (e->state == E_NONE) { enemy_yaw[i] = -1; continue; }
+		if (e->state == E_NONE) { enemy_yaw[i] = -1; husk_anim[i].state = -1; continue; }
 		int ex = e->x * 16, ey = e->y * 16;
 		if (e->state == E_MOVE) {
 			ex = e->from_x * 16 + (e->x - e->from_x) * 16 * e->t / 36;
@@ -1311,7 +1302,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		if (enemy_yaw[i] < 0) enemy_yaw[i] = want;
 		if (e->state != E_WINDUP && e->state != E_RECOVER) enemy_yaw[i] = ease_angle(enemy_yaw[i], want, 6);
 		Pose ps;
-		husk_pose(e, &ps);
+		husk_pose(i, &ps);
 		/* Killed: a white flash, then it's the stone chunks. */
 		if (e->state == E_DYING && e->t > 3) continue;
 		int tint = e->hit_t < 5 || e->state == E_DYING ? 1 : e->state == E_STAGGER ? 3 : 0;

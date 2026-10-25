@@ -72,8 +72,11 @@ effects, synthesised and encoded as SPU ADPCM).
   crumbling ring), statues, textured figures lit by the GTE, shadows, ash,
   sparks and stone chunks, the death's grading, the HUD.
 - `src/models.c`: the soul, the husk and the statues, built from boxes,
-  prisms and cones (materials, rounded normals) and posed by turning their
-  parts.
+  prisms and cones (materials, rounded normals); parts hang from parents
+  (arms and heads from the body).
+- `src/anim.c`: keyframed animations (idle, walk, dodge, jump, charge,
+  swings, drink, death; the husk's lumber, windup, slam, broken reel),
+  eased between keys and blended from one to the next.
 - `src/audio.c`: sound effects on SPU voices, from game events.
 - `src/ui.c`: lettering, carved panels, fades, the title screen and the
   menus, settings and button mapping.
