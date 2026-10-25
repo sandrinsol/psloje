@@ -29,7 +29,9 @@ extern const uint32_t glyphs_tim[], slabs_tim[], figtex_tim[];
 #define TILE_U      256
 #define SLAB_GAP    10          /* each side: the void shows between slabs */
 #define SLAB_DEPTH  56
-#define SCREEN_H    170         /* projection distance */
+#define SCREEN_H    proj_h      /* projection distance: 170, doubled behind the title (640 x 480) */
+static int proj_h = 170, scr_w = 320, scr_h = 240;
+static int title_mode;   /* drawing the scene behind the title */
 #define NEAR_Z      96
 #define CAM_PITCH   620         /* looking down, 4096 = full turn (~55 degrees) */
 #define CAM_DIST_PER_TILE 228   /* camera distance from the floor's middle, per tile of width */
@@ -183,7 +185,7 @@ static inline int on_screen(const Proj *p, int n) {
 	for (int i = 0; i < n; i++) {
 		int x = p[i].x, y = p[i].y;
 		if (p[i].z < NEAR_Z || (unsigned)(x + 600) > 1520 || (unsigned)(y + 600) > 1440) return 0;
-		out_l &= x < 0; out_r &= x >= 320; out_t &= y < 0; out_b &= y >= 240;
+		out_l &= x < 0; out_r &= x >= scr_w; out_t &= y < 0; out_b &= y >= scr_h;
 	}
 	return !(out_l | out_r | out_t | out_b);
 }
@@ -313,6 +315,11 @@ static void update_camera(int frame) {
 	/* The boss's entrance: the camera swings in close to where it rises,
 	 * round to one side, and back. */
 	int pan_x = frame_x, look_z = CAM_LOOK_Z * frame_w / (grid_n << 8) + frame_z;
+	if (title_mode) {   /* drifting slowly from side to side over the floor */
+		dist = 10 * CAM_DIST_PER_TILE + (isin((frame * 3) & 4095) * 120 >> 12);
+		pan_x = isin((frame * 2) & 4095) * 260 >> 12;
+		look_z = CAM_LOOK_Z + 200;
+	}
 	if (floor_state == F_BOSS_INTRO && boss >= 0) {
 		int t = floor_t > BOSS_INTRO ? BOSS_INTRO : floor_t, k = isin(t * 2048 / BOSS_INTRO);   /* 0 .. 1 .. 0 */
 		int bx, bz;
@@ -392,7 +399,7 @@ static void draw_sky(int frame) {
 	grade(&bot[0], &bot[1], &bot[2]);
 	POLY_G4 *q = (POLY_G4 *)prim;
 	setPolyG4(q);
-	setXY4(q, 0, 0, 320, 0, 0, 240, 320, 240);
+	setXY4(q, 0, 0, scr_w, 0, 0, scr_h, scr_w, scr_h);
 	setRGB0(q, clamp255(top[0]), clamp255(top[1]), clamp255(top[2]));
 	setRGB1(q, clamp255(top[0]), clamp255(top[1]), clamp255(top[2]));
 	setRGB2(q, bot[0], bot[1], bot[2]);
@@ -402,10 +409,11 @@ static void draw_sky(int frame) {
 
 	uint32_t *s = ot + OT_LEN - 2;
 	/* High cloud drifting across the top. */
+	int k = scr_w / 320;   /* 2 behind the title */
 	for (int i = 0; i < 3; i++) {
 		int x = ((frame / 3 + i * 173) % 520) - 100, y = 10 + i * 11;
 		int c = 30 + flash / 4;
-		sprite(s, x, y, 64, 18, FX_CLOUD, CLUT_CLOUD, c, c, c + 4, 1, i & 1);
+		sprite(s, x * k, y * k, 64 * k, 18 * k, FX_CLOUD, CLUT_CLOUD, c, c, c + 4, 1, i & 1);
 	}
 	/* The eye, far off above the floor. It blinks; it watches the soul; it
 	 * narrows while the Unfinished fights; it closes as you die. */
@@ -421,18 +429,18 @@ static void draw_sky(int frame) {
 		int c = 84 + flash / 3;
 		int ec[3] = { c * 5 / 4, c, c * 7 / 8 };
 		grade(&ec[0], &ec[1], &ec[2]);
-		sprite(s, 160, 40, 40, hh, FX_EYE, CLUT_EYE, clamp255(ec[0]), clamp255(ec[1]), clamp255(ec[2]), 0, 0);
+		sprite(s, 160 * k, 40 * k, 40 * k, hh * k, FX_EYE, CLUT_EYE, clamp255(ec[0]), clamp255(ec[1]), clamp255(ec[2]), 0, 0);
 		/* Its iris turned towards the soul, and the slit in it. */
 		static int look_x, look_y;
 		Proj sp;
 		project(soul_x, -100, soul_z, &sp);
-		int lx = (sp.x - 160) * 12 / 160, ly = (sp.y - 150) * 4 / 120;
+		int lx = (sp.x / k - 160) * 12 / 160, ly = (sp.y / k - 150) * 4 / 120;
 		lx = lx < -12 ? -12 : lx > 12 ? 12 : lx;
 		ly = ly < -3 ? -3 : ly > 3 ? 3 : ly;
 		look_x += (lx * 16 - look_x) / 8;
 		look_y += (ly * 16 - look_y) / 8;
-		int ix = 160 + look_x / 16, iy = 40 + look_y / 16 * hh / 15;
-		int rx = 10, ry = hh - 3 < 8 ? hh - 3 : 8;
+		int ix = (160 + look_x / 16) * k, iy = (40 + look_y / 16 * hh / 15) * k;
+		int rx = 10 * k, ry = (hh - 3 < 8 ? hh - 3 : 8) * k;
 		int ic[3] = { 46 + flash / 4, 20 + flash / 6, 12 }, oc[3] = { 150, 96, 52 };   /* dark in the middle, amber at the rim */
 		grade(&ic[0], &ic[1], &ic[2]);
 		grade(&oc[0], &oc[1], &oc[2]);
@@ -448,7 +456,7 @@ static void draw_sky(int frame) {
 			addPrim(si, g);
 			prim += sizeof(POLY_G3);
 		}
-		int sw = want < 4096 ? 1 : 2, sh = ry + 1;   /* thinner in its anger */
+		int sw = (want < 4096 ? 1 : 2) * k, sh = ry + k;   /* thinner in its anger */
 		if (ry > 0 && prim + sizeof(POLY_F4) < prim_end) {
 			POLY_F4 *f = (POLY_F4 *)prim;
 			setPolyF4(f);
@@ -458,7 +466,7 @@ static void draw_sky(int frame) {
 			prim += sizeof(POLY_F4);
 		}
 	}
-	sprite(s, 160, 40, 60, 26, FX_GLOW, CLUT_GLOW, 40 + flash / 6, 12, 8, 1, 0);
+	sprite(s, 160 * k, 40 * k, 60 * k, 26 * k, FX_GLOW, CLUT_GLOW, 40 + flash / 6, 12, 8, 1, 0);
 	/* The bolt: a jagged line down the side of the sky. */
 	if (flash > 140) {
 		int x = bolt_x, y = 0;
@@ -466,7 +474,7 @@ static void draw_sky(int frame) {
 			int nx = x + ((frame * 13 + i * 37) % 21) - 10, ny = y + 9 + i % 3 * 3;
 			LINE_F2 *l = (LINE_F2 *)prim;
 			setLineF2(l);
-			setXY2(l, x, y, nx, ny);
+			setXY2(l, x * k, y * k, nx * k, ny * k);
 			setRGB0(l, 230, 230, 255);
 			addPrim(s, l);
 			prim += sizeof(LINE_F2);
@@ -488,9 +496,9 @@ static void draw_clouds(int frame) {
 		project(x, y, z, &p);
 		if (p.z < NEAR_Z) continue;
 		int hw = h * SCREEN_H / p.z;
-		if (hw > 80) hw = 80;
+		if (hw > 80 * scr_w / 320) hw = 80 * scr_w / 320;
 		int hh = hw / 2;
-		if (p.x + hw < 0 || p.x - hw > 320 || p.y + hh < 0 || p.y - hh > 240) continue;
+		if (p.x + hw < 0 || p.x - hw > scr_w || p.y + hh < 0 || p.y - hh > scr_h) continue;
 		int c = 60 - fog_of(p.z) / 8 + flash / 5;
 		sprite(ot + OT_LEN - 2, p.x, p.y, hw, hh, FX_CLOUD, CLUT_CLOUD, c, c, c + 6, 1, i & 3);
 	}
@@ -1792,6 +1800,19 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 	}
 
 	draw_particles(frame);
-	draw_hud(frame);
+	if (!title_mode) draw_hud(frame);
 	return prim;
+}
+
+uint8_t *draw_title_scene(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame) {
+	title_mode = 1;
+	proj_h = 340; scr_w = 640; scr_h = 480;
+	gte_SetGeomOffset(320, 240);
+	gte_SetGeomScreen(340);
+	uint8_t *p = draw_frame(ot_, prim_, end, frame, 1);
+	gte_SetGeomOffset(160, 120);
+	gte_SetGeomScreen(170);
+	proj_h = 170; scr_w = 320; scr_h = 240;
+	title_mode = 0;
+	return p;
 }

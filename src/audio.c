@@ -8,13 +8,14 @@
 #include "audio.h"
 #include "game.h"
 #include "sfx.h"
+#include "pad.h"
 #include "music.h"
 #include "ui.h"
 
 extern const uint32_t sfx_bin[];
 
 #define SPU_BASE  0x1010   /* after the SPU's reserved first 4 KB */
-#define VOICES    6        /* 6 and 7: voices (music.c), 8..23: music */
+#define VOICES    5        /* 5: the wind, 6 and 7: voices (music.c), 8..23: music */
 
 static uint32_t addr[NUM_SFX];
 static int next_voice;
@@ -73,5 +74,18 @@ void audio_events(void) {
 		if (t == EV_CRUMBLE) audio_play(SFX_SLAM, 0x3400, 2200);  /* stone giving way, deep */
 		if (t == EV_SPAWN) audio_play(SFX_DODGE, 0x2400, 2600);   /* ash drawn together */
 		if (t == EV_PERFECT) music_voice(INST_SWELL, 64, 0x2400, 0);
+		/* The pad's motors (pad.c): the small one buzzes, the big one thuds. */
+		switch (t) {
+		case EV_HURT:    pad_rumble(6, 200, 10); break;
+		case EV_HEAVY:   pad_rumble(4, 140, 8); break;
+		case EV_RIPOSTE: pad_rumble(6, 255, 14); break;
+		case EV_KILL:    pad_rumble(0, 120, 8); break;
+		case EV_DEATH:   pad_rumble(0, 255, 30); break;
+		case EV_FALL:    pad_rumble(0, 110, 24); break;
+		case EV_CRUMBLE: pad_rumble(0, 150, 40); break;
+		case EV_BOSS:    pad_rumble(0, 200, 40); break;
+		case EV_SLAM:    if (boss >= 0) pad_rumble(0, 170, 8); break;
+		case EV_PERFECT: pad_rumble(8, 0, 0); break;
+		}
 	}
 }

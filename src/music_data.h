@@ -2,7 +2,7 @@
 #pragma once
 #include <stdint.h>
 #define MUSIC_RATE  22050
-#define MUSIC_BYTES 153472
+#define MUSIC_BYTES 203904
 enum {
 	INST_CHOIR,
 	INST_DRONE,
@@ -13,6 +13,7 @@ enum {
 	INST_WHISPER,
 	INST_SIGH,
 	INST_SWELL,
+	INST_WIND,
 	NUM_INSTRUMENTS
 };
 typedef struct {
@@ -30,6 +31,7 @@ static const Instrument instruments[NUM_INSTRUMENTS] = {
 	{ 89024, 60, 0x000f, 0x002e },   /* WHISPER */
 	{ 105472, 60, 0x000f, 0x002e },   /* SIGH */
 	{ 125696, 57, 0x000f, 0x0030 },   /* SWELL */
+	{ 153472, 60, 0x400f, 0x0032 },   /* WIND */
 };
 typedef struct {
 	uint16_t at, len;   /* ticks (1/60 s) */

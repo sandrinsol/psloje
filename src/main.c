@@ -24,6 +24,7 @@
 #include "audio.h"
 #include "music.h"
 #include "save.h"
+#include "pad.h"
 #include "ui.h"
 
 #define PRIM_LEN (96 * 1024)
@@ -85,9 +86,7 @@ static void init(void) {
 	audio_init();   /* before the pads: SpuInit() hangs after StartPAD() */
 	music_init();
 
-	InitPAD(pad_buffers[0], 34, pad_buffers[1], 34);
-	StartPAD();
-	ChangeClearPAD(0);
+	pad_init();   /* the pad read directly, for its motors (pad.c) */
 	/* The save, before anything takes input (one is made if there isn't). */
 	if (!save_load()) save_write();
 	trials = record.trials;
@@ -98,6 +97,7 @@ static void init(void) {
 }
 
 static void read_pad(uint16_t *now_out, uint16_t *pressed_out) {
+	pad_poll(pad_buffers[0]);
 	PADTYPE *pad = (PADTYPE *)pad_buffers[0];
 	uint16_t now = 0;
 	if (pad->stat == 0 && pad->type != 0)
@@ -136,6 +136,8 @@ enum { GO_GAME = 100, GO_MEMORY, GO_TITLE };
 
 static void go_title(void) {
 	set_video(1);
+	music_ambience(0);
+	game_title_scene();   /* the floor behind it */
 	screen = SCREEN_TITLE;
 	title_ready = 0;
 	menu_open(MENU_NONE);
@@ -163,6 +165,7 @@ static void go_opening(void) {
 /* After the boss: its memory. */
 static void go_memory(void) {
 	set_video(1);
+	music_ambience(0);
 	screen = SCREEN_MEMORY;
 	story_t = 0;
 	fade_to(0, 3);
@@ -176,6 +179,7 @@ static void go_game(void) {
 	game_start_floor(0);
 	fade_to(0, 4);
 	music_play(SONG_SLOTH, 90);
+	music_ambience(1);
 	record.runs++;
 	trials = record.trials;
 }
@@ -277,6 +281,19 @@ static void update(uint16_t now, uint16_t pressed) {
 	carried = 0;
 	game_update(&in);
 	ticked = 1;
+	/* Low on health: a heartbeat, quicker as it falls, and the music
+	 * pulled back under it. */
+	{
+		static int beat_t, low;
+		int now_low = player.hp > 0 && player.hp <= 30 && player.state != P_DEAD && player.state != P_FALL;
+		if (now_low != low) { low = now_low; music_level(low ? 140 : 256, 40); beat_t = 0; }
+		if (low) {
+			int period = 36 + player.hp;   /* frames between beats */
+			if (beat_t == 0) music_voice(INST_PULSE, 38, 0x3400, 0);
+			if (beat_t == 11) music_voice(INST_PULSE, 36, 0x2400, 0);
+			if (++beat_t >= period) beat_t = 0;
+		}
+	}
 	for (int i = 0; i < num_events; i++) {
 		if (game_events[i].type == EV_DEATH) {
 			slow_t = 90;
@@ -313,6 +330,10 @@ int main(int argc, const char **argv) {
 		prim = ui_end();
 		hud_quiet = paused;
 		if (screen == SCREEN_GAME) prim = draw_frame(b->ot, prim, end, frame_count, ticked);
+		if (screen == SCREEN_TITLE) {
+			game_title_tick();
+			prim = draw_title_scene(b->ot, prim, end, frame_count);
+		}
 		ui_begin(b->ot, prim, end);
 		if (screen == SCREEN_TITLE) {
 			if (!title_ready && (frame_count & 32))

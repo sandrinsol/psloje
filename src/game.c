@@ -223,6 +223,22 @@ void game_start_floor(int keep_drop) {
 	say("FLOOR I  -  SLOTH", 120);
 }
 
+void game_title_scene(void) {
+	game_start_floor(0);
+	player.x = player.from_x = 1;   /* to the left of the menu */
+	player.y = player.from_y = 6;
+	player.facing = DIR_DOWN;
+	drop_amount = 0;
+	drop_x = drop_y = -1;
+	message = 0;
+	floor_state = F_FIGHT;   /* (not an entrance: no title card) */
+	floor_t = 200;
+}
+
+void game_title_tick(void) {
+	game_frames++;
+}
+
 static void spawn_wave(void) {
 	int n = 0;
 	for (int i = 0; i < 3; i++) {

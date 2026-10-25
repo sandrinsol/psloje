@@ -12,6 +12,7 @@
 #include "game.h"
 #include "save.h"
 #include "draw.h"
+#include "pad.h"
 
 extern const uint32_t font_small_tim[], font_large_tim[], logo_tim[];
 
@@ -234,15 +235,15 @@ void title_draw(int frame, int show_logo) {
 		logo(w / 2, y, 200 + (isin((frame * 23) & 4095) >> 8), 5);
 		text(w / 2, y + LOGO_H / (ui_hires ? 1 : 2) + 6, "A TRIAL OF SEVEN SINS", ui_hires ? FONT_LARGE : FONT_SMALL, 120, 112, 104, 1, 5);
 	}
-	/* Ash drifting down through grey light, a dark floor of cloud below. */
+	/* Ash drifting down over the floor (drawn behind, in 3D). */
 	for (int i = 0; i < 70; i++) {
 		int x = (i * 131 + (isin((frame * 5 + i * 700) & 4095) * 12 >> 12)) % w;
 		int y = ((frame * (1 + i % 3)) / 3 + i * 53) % (h + 20) - 10;
 		int c = 60 + (i * 29) % 70, s = ui_hires ? 2 + (i % 3 == 0) : 1 + (i % 4 == 0);
 		tile(x, y, s, s, c, c - 4, c - 6, 6);
 	}
-	gradient(0, 0, w, h * 2 / 3, 70, 64, 66, 18, 16, 20, 8);
-	gradient(0, h * 2 / 3, w, h / 3 + 1, 18, 16, 20, 4, 4, 6, 8);
+	/* Darker behind the name and the menu, so they read over the scene. */
+	dark_box(0, 0, w, h, 40, 7);
 }
 
 /* ---- Menus ---------------------------------------------------------------------------------- */
@@ -277,7 +278,7 @@ void time_text(char *out, int frames) {
 	sprintf(out, "%d:%02d", s / 60, s % 60);
 }
 static const Item PAUSE_ITEMS[] = { { "RESUME", 0 }, { "OPTIONS", 0 }, { "RETURN TO TITLE", 0 } };
-static const Item OPTION_ITEMS[] = { { "MUSIC", 1 }, { "SOUND", 1 }, { "CONTROLS", 0 }, { "BACK", 0 } };
+static const Item OPTION_ITEMS[] = { { "MUSIC", 1 }, { "SOUND", 1 }, { "VIBRATION", 2 }, { "CONTROLS", 0 }, { "BACK", 0 } };
 static const char *ACTION_NAMES[NUM_ACTIONS] = { "ATTACK", "DODGE", "JUMP", "FLASK", "SKILL I", "SKILL II" };
 
 static int count(void) {
@@ -285,7 +286,7 @@ static int count(void) {
 	case MENU_TITLE: return 4;
 	case MENU_TRIALS: return NUM_TRIALS;
 	case MENU_PAUSE: return 3;
-	case MENU_OPTIONS: return 4;
+	case MENU_OPTIONS: return 5;
 	case MENU_CONTROLS: return NUM_ACTIONS + 2;   /* + DEFAULTS, BACK */
 	case MENU_CREDITS: return 1;
 	}
@@ -360,13 +361,17 @@ int menu_update(uint16_t held, uint16_t pressed) {
 	case MENU_OPTIONS:
 		if (sel == 0 && lr) settings.music = settings.music + lr > 10 ? 10 : settings.music + lr < 0 ? 0 : settings.music + lr;
 		if (sel == 1 && lr) settings.sound = settings.sound + lr > 10 ? 10 : settings.sound + lr < 0 ? 0 : settings.sound + lr;
-		if (ok && sel == 2) menu_open(MENU_CONTROLS);
-		if ((ok && sel == 3) || back) { menu = back_to; sel = back_to == MENU_TITLE ? 2 : 1; }
+		if (sel == 2 && (lr || ok)) {
+			settings.no_rumble ^= 1;
+			if (!settings.no_rumble) pad_rumble(10, 160, 12);   /* a taste of it */
+		}
+		if (ok && sel == 3) menu_open(MENU_CONTROLS);
+		if ((ok && sel == 4) || back) { menu = back_to; sel = back_to == MENU_TITLE ? 2 : 1; }
 		break;
 	case MENU_CONTROLS:
 		if (ok && sel < NUM_ACTIONS) waiting_key = 1;
 		if (ok && sel == NUM_ACTIONS) memcpy(settings.keys, DEFAULT_KEYS, sizeof(DEFAULT_KEYS));
-		if ((ok && sel == NUM_ACTIONS + 1) || back) { menu = MENU_OPTIONS; sel = 2; }
+		if ((ok && sel == NUM_ACTIONS + 1) || back) { menu = MENU_OPTIONS; sel = 3; }
 		break;
 	case MENU_CREDITS:
 		if (ok || back) { menu = back_to; sel = 3; }
@@ -464,6 +469,10 @@ void menu_draw(int frame) {
 		text(lx, y, label, F, r, g, b, kind ? 0 : 1, 1);
 		int vx = cx + (hi ? 40 : 20);
 		if (kind == 1) slider(vx, y + (hi ? 9 : 4), i == 0 ? settings.music : settings.sound);
+		if (kind == 2) {
+			sprintf(line, "< %s >", settings.no_rumble ? "OFF" : "ON");
+			text(vx, y, line, F, r, g, b, 0, 1);
+		}
 		if (kind == 3) {
 			const char *v = on && waiting_key ? ((frame & 16) ? "PRESS A BUTTON" : "") : button_name(settings.keys[i]);
 			text(vx, y, v, F, r, g, b, 0, 1);
