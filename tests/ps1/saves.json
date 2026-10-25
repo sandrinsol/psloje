@@ -29,6 +29,9 @@
     {"name": "title menu: TRIALS", "tap": "DOWN"},
     {"tap": "CROSS"},
     {"wait": 20},
-    {"assert": "goldens/trials.png"}
+    {"assert": "goldens/trials.png"},
+    {"name": "Circle: back to the title menu", "tap": "CIRCLE"},
+    {"wait": 20},
+    {"assert": "goldens/trials_back.png"}
   ]
 }

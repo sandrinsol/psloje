@@ -28,7 +28,7 @@ typedef struct {
 } Input;
 
 typedef struct {
-	int32_t x, y;           /* tile (the one being left until halfway through a dodge) */
+	int32_t x, y;           /* tile (a dodge's destination from its start) */
 	int32_t from_x, from_y; /* dodge start, for drawing */
 	int32_t facing;
 	int32_t state, t;       /* state and frames in it */
@@ -62,6 +62,10 @@ typedef struct {
 
 /* A walking step, one tile (a dodge is 9 frames). */
 #define WALK_FRAMES   20
+#define DODGE_FRAMES  12   /* a dodge: two tiles (over an enemy too) */
+#define DODGE_TILES   2
+#define IFRAME_FIRST  2    /* invincible frames 2..9 of the dodge */
+#define IFRAME_LAST   9
 /* A jump: off the ground (attacks on the floor miss) from AIR_FIRST to
  * AIR_LAST. */
 #define JUMP_FRAMES   28
@@ -118,3 +122,5 @@ void game_start_floor(int keep_drop);
 void game_update(const Input *in);
 /* 0..256 how bright tile (x, y)'s telegraph is (0 = none, 256 = about to land). */
 int game_telegraph(int x, int y);
+/* The tile the soul is on now (passing over others while it dodges). */
+void game_player_tile(int *x, int *y);

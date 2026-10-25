@@ -17,8 +17,8 @@
     {"wait": 3},
     {"assertRam": "player+20", "as": "s32", "equals": 6},
     {"name": "a dodge right cuts the walk short: from the tile it left", "tap": ["RIGHT", "CIRCLE"], "hold": 2, "release": 0},
-    {"wait": 14},
-    {"assertRam": "player", "as": "s32", "equals": 5},
+    {"wait": 16},
+    {"assertRam": "player", "as": "s32", "equals": 6},
     {"assertRam": "player+4", "as": "s32", "equals": 8},
     {"wait": 30},
     {"name": "a swing", "tap": "SQUARE", "hold": 2, "release": 0},
@@ -37,6 +37,14 @@
     {"wait": 8},
     {"analog": "left", "x": 0, "y": 0},
     {"wait": 24},
-    {"assertRam": "player", "as": "s32", "equals": 5}
+    {"assertRam": "player", "as": "s32", "equals": 5},
+    {"name": "a husk right beside the soul", "write": "enemies+8", "hex": "06000000 07000000 06000000 07000000"},
+    {"name": "(it's there)", "assertRam": "enemies", "as": "s32", "min": 1, "max": 5},
+    {"name": "a dodge right passes over it", "tap": ["RIGHT", "CIRCLE"], "hold": 2, "release": 0},
+    {"wait": 3},
+    {"assertRam": "player", "as": "s32", "equals": 7},
+    {"wait": 16},
+    {"assertRam": "player", "as": "s32", "equals": 7},
+    {"assertRam": "player+4", "as": "s32", "equals": 7}
   ]
 }

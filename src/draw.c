@@ -765,9 +765,7 @@ static int32_t fall_at[MAX_N][MAX_N];   /* floor_t when each slab starts to fall
 
 static void draw_floor(int frame) {
 	int n = grid_n, px, py;
-	int moving = (player.state == P_DODGE || player.state == P_WALK) && player.t < 5;
-	px = moving ? player.from_x : player.x;
-	py = moving ? player.from_y : player.y;
+	game_player_tile(&px, &py);
 	int any_tele = 0;
 	for (int y = 0; y < n; y++)
 		for (int x = 0; x < n; x++) any_tele |= tele[y][x] = game_telegraph(x, y);
@@ -1066,6 +1064,8 @@ static void box2d(int layer, int x, int y, int w, int h, int r, int g, int b) {
 	prim += sizeof(TILE);
 }
 
+int hud_quiet;
+
 static const char *ROMAN[] = { "I", "II", "III", "IV", "V", "VI", "VII" };
 
 /* The HUD: two carved panels on top (life, stamina, flasks; absolution),
@@ -1074,6 +1074,8 @@ static void draw_hud(int frame) {
 	char line[48];
 	const Player *p = &player;
 	ui_begin(ot, prim, prim_end);
+	/* The boss's entrance is a scene of its own: no HUD over the letterbox. */
+	if (floor_state == F_BOSS_INTRO) goto scene;
 	panel(6, 5, 148, 25, 1);
 	bar(11, 9, 100, 7, p->hp, HP_MAX, 200, 36, 30, 0);
 	bar(11, 19, 100, 6, p->stamina, STAMINA_MAX * 16, 150, 170, 80, 0);
@@ -1091,6 +1093,8 @@ static void draw_hud(int frame) {
 		sprintf(line, "WAVE %s", ROMAN[wave < 3 ? wave : 2]);
 		text(202, 11, line, FONT_SMALL, 170, 160, 150, 1, 0);
 	}
+scene:
+	if (hud_quiet) { prim = ui_end(); return; }
 	/* The boss: letterbox bars and its name carved, then its life along
 	 * the bottom. */
 	if (floor_state == F_BOSS_INTRO) {
@@ -1104,8 +1108,12 @@ static void draw_hud(int frame) {
 			for (int i = 0; i < n; i++) shown[i] = NAME[i];
 			shown[n] = 0;
 			int fade = t > BOSS_INTRO - 40 ? (BOSS_INTRO - t) * 6 : 240;
-			dark_box(0, 166, 320, 36, fade / 2, 2);
-			text(160 - text_width(NAME, FONT_LARGE) / 2, 170, shown, FONT_LARGE, fade, fade * 3 / 4, fade / 2, 0, 0);
+			/* Gone as the bars draw back (dimmed further, it would turn to
+			 * black letters over the floor). */
+			if (fade > 90) {
+				dark_box(0, 166, 320, 36, fade / 2, 2);
+				text(160 - text_width(NAME, FONT_LARGE) / 2, 170, shown, FONT_LARGE, fade, fade * 3 / 4, fade / 2, 0, 0);
+			}
 		}
 	}
 	if (banner_t > 0) {
@@ -1124,14 +1132,18 @@ static void draw_hud(int frame) {
 	if (message && (message_t > 0 || floor_state == F_DEAD || floor_state == F_CLEARED)) {
 		int big = text_width(message, FONT_LARGE) <= 280;
 		int dead = floor_state == F_DEAD;
-		int y = dead ? 82 : 92;
-		dark_box(0, y, 320, big ? 38 : 26, 120, 2);
+		int y = dead ? 78 : 92;
+		/* Dead: the band holds the way back up and the guilt as well. */
+		dark_box(0, y - (dead ? 4 : 0), 320, dead ? 86 : big ? 38 : 26, dead ? 150 : 120, 2);
 		text(160, y + (big ? 5 : 6), message, big ? FONT_LARGE : FONT_SMALL, dead ? 210 : 220, dead ? 50 : 200, dead ? 40 : 160, 1, 0);
 	}
 	if (floor_state == F_DEAD) {
-		if (floor_t > 90 && (game_frames & 32)) text(160, 126, "PRESS CROSS TO RISE AGAIN", FONT_SMALL, 200, 190, 180, 1, 0);
+		if (floor_t > 90 && (game_frames & 32)) {
+			sprintf(line, "PRESS %s TO RISE AGAIN", action_button(ACT_JUMP));
+			text(160, 122, line, FONT_SMALL, 200, 190, 180, 1, 0);
+		}
 		sprintf(line, "GUILT %d", guilt + 1);
-		text(160, 148, line, FONT_SMALL, 150, 120, 110, 1, 0);
+		text(160, 141, line, FONT_SMALL, 150, 120, 110, 1, 0);
 	}
 	prim = ui_end();
 }
@@ -1176,7 +1188,7 @@ static void soul_pose(Pose *ps) {
 	const Player *p = &player;
 	switch (p->state) {
 	case P_WALK:   animate(&soul_anim, P_WALK, A_SOUL_WALK, p->t, WALK_FRAMES, BLEND_FRAMES, ps); break;
-	case P_DODGE:  animate(&soul_anim, P_DODGE, A_SOUL_DODGE, p->t, 9, 2, ps); break;
+	case P_DODGE:  animate(&soul_anim, P_DODGE, A_SOUL_DODGE, p->t, DODGE_FRAMES, 2, ps); break;
 	case P_JUMP:   animate(&soul_anim, P_JUMP, A_SOUL_JUMP, p->t, JUMP_FRAMES, 3, ps); break;
 	case P_CHARGE:
 		animate(&soul_anim, P_CHARGE, A_SOUL_CHARGE, p->t, CHARGE_FULL, 3, ps);
@@ -1324,7 +1336,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 	/* Where the soul is (between tiles while dodging). */
 	int fx = player.x * 16, fy = player.y * 16;
 	if (player.state == P_DODGE || player.state == P_WALK) {
-		int n = player.state == P_WALK ? WALK_FRAMES : 9;
+		int n = player.state == P_WALK ? WALK_FRAMES : DODGE_FRAMES;
 		fx = player.from_x * 16 + (player.x - player.from_x) * 16 * player.t / n;
 		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * player.t / n;
 	}
@@ -1335,7 +1347,8 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		static int32_t shown_x, shown_z, off_x, off_z;
 		int dx = soul_x + off_x - shown_x, dz = soul_z + off_z - shown_z;
 		if (floor_t < 2 && floor_state == F_WAVE_INTRO && wave == 0) off_x = off_z = 0;
-		else if (dx * dx + dz * dz > 40 * 40 && dx * dx + dz * dz < 400 * 400) { off_x = shown_x - soul_x; off_z = shown_z - soul_z; }
+		/* (a jump of more than a dodge moves in a frame: two tiles in 12, 43) */
+		else if (dx * dx + dz * dz > 60 * 60 && dx * dx + dz * dz < 400 * 400) { off_x = shown_x - soul_x; off_z = shown_z - soul_z; }
 		soul_x += off_x;
 		soul_z += off_z;
 		shown_x = soul_x;
@@ -1440,7 +1453,7 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		Pose ps;
 		soul_pose(&ps);
 		int tint = player.hurt_t < 8 ? 2 : 0;
-		int dodge_glow = player.state == P_DODGE && player.t >= 2 && player.t <= 7;
+		int dodge_glow = player.state == P_DODGE && player.t >= IFRAME_FIRST && player.t <= IFRAME_LAST;
 		model_red = tele[player.y][player.x] / 3;
 		model_glow = soul_glow;
 		draw_model(&soul_model, &ps, soul_x, 0, soul_z, player.facing * 1024, dodge_glow ? 300 : 256, tint, 256, 1);

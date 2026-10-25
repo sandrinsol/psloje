@@ -66,7 +66,9 @@ static void key_on(int v, int inst, int note, int vol, int pan) {
 }
 
 void music_init(void) {
-	static uint32_t zero[1024];   /* 4 KB of nothing */
+	/* Nothing, as much as the reverb's work area (in one go: many small
+	 * transfers here took seconds). */
+	static uint32_t zero[((REVERB_SIZE + 0xfff) & ~0xfff) / 4];
 	/* The instruments, after the sound effects. */
 	uint32_t base = audio_free_addr();
 	SpuSetTransferStartAddr(base);
@@ -75,11 +77,9 @@ void music_init(void) {
 	for (int i = 0; i < NUM_INSTRUMENTS; i++) inst_addr[i] = base + instruments[i].offset;
 	/* The reverb: its work area cleared first, else it plays back noise. */
 	SPU_CTRL &= ~0x0080;
-	for (uint32_t a = REVERB_BASE & ~0xfff; a < 0x80000; a += sizeof(zero)) {   /* whole DMA blocks */
-		SpuSetTransferStartAddr(a);
-		SpuWrite(zero, sizeof(zero));
-		SpuIsTransferCompleted(SPU_TRANSFER_WAIT);
-	}
+	SpuSetTransferStartAddr(0x80000 - sizeof(zero));
+	SpuWrite(zero, sizeof(zero));
+	SpuIsTransferCompleted(SPU_TRANSFER_WAIT);
 	for (int i = 0; i < 32; i++) REV_REG(i) = HALL[i];
 	SPU_REVERB_ADDR = REVERB_BASE / 8;
 	SPU_REVERB_VOL_L = 0x2800;

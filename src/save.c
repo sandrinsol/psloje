@@ -146,16 +146,27 @@ static int write_frame3(int sector, const uint8_t *buf) {
 	return 0;
 }
 
+/* The block our save was last found in: checked again (one frame) rather
+ * than the whole directory read each time, in case the card was swapped. */
+static int known_block;
+
 /* The directory (frames 1..15, one a block): our save's block, or a free
  * one (*fresh = 1), or 0 if there's no card or no room. */
 static int find_block(int *fresh) {
 	uint8_t f[128];
 	int free_block = 0;
+	if (known_block) {
+		if (read_frame3(known_block, f) && f[0] == 0x51 && !strncmp((const char *)f + 10, FILE_NAME, 20)) {
+			*fresh = 0;
+			return known_block;
+		}
+		known_block = 0;
+	}
 	if (!read_frame3(0, f) || f[0] != 'M' || f[1] != 'C') return 0;
 	for (int b = 1; b < 16; b++) {
 		if (!read_frame3(b, f)) return 0;
 		uint32_t state = f[0] | f[1] << 8 | f[2] << 16 | (uint32_t)f[3] << 24;
-		if (state == 0x51 && !strncmp((const char *)f + 10, FILE_NAME, 20)) { *fresh = 0; return b; }
+		if (state == 0x51 && !strncmp((const char *)f + 10, FILE_NAME, 20)) { *fresh = 0; return known_block = b; }
 		if ((state & 0xf0) == 0xa0 && !free_block) free_block = b;
 	}
 	*fresh = 1;
@@ -213,8 +224,10 @@ int save_write(void) {
 		for (int i = 0; i < 127; i++) f[127] ^= f[i];
 		ok = write_frame3(bl, f);
 	}
-	/* Only the frames with something in them: the rest of the block is unused. */
-	for (int i = 0; ok && i < 8; i++) ok = write_frame3(bl * 64 + i, block + i * 128);
+	/* Only the frames with something in them (the rest of the block is
+	 * unused); the header (title, icon) once, when the save is made. */
+	for (int i = fresh ? 0 : 0x200 / 128; ok && i < 8; i++) ok = write_frame3(bl * 64 + i, block + i * 128);
+	if (ok && fresh) known_block = bl;
 	StartPAD();
 	ChangeClearPAD(0);
 	save_state = ok ? 2 : -1;

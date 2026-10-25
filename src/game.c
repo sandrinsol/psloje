@@ -8,9 +8,6 @@
 #include "game.h"
 
 /* Player timing (frames) and costs. Stamina is kept x16 for slow refills. */
-#define STEP_FRAMES     9      /* a dodge: one tile */
-#define IFRAME_FIRST    2      /* invincible frames 2..7 of the dodge */
-#define IFRAME_LAST     7
 #define DODGE_COST      (25 * 16)
 #define ATTACK_WINDUP   8      /* sword: hits on frame 8 */
 #define ATTACK_FRAMES   22
@@ -198,9 +195,17 @@ static void spawn_boss(void) {
 
 /* ---- Player ------------------------------------------------------------------- */
 
-/* The tile the player can be hit on: the dodge's destination from halfway. */
+/* The tile the player can be hit on: on a dodge, each tile it passes in
+ * turn; on a walk, the one left until halfway. */
 static void player_tile(int *x, int *y) {
-	if ((player.state == P_DODGE && player.t < STEP_FRAMES / 2) || (player.state == P_WALK && player.t < WALK_FRAMES / 2)) {
+	if (player.state == P_DODGE) {
+		int dx = player.x - player.from_x, dy = player.y - player.from_y;
+		int n = dx ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
+		int k = (n * player.t + DODGE_FRAMES / 2) / DODGE_FRAMES;   /* tiles covered so far */
+		if (k > n) k = n;
+		*x = player.from_x + (n ? dx / n * k : 0);
+		*y = player.from_y + (n ? dy / n * k : 0);
+	} else if (player.state == P_WALK && player.t < WALK_FRAMES / 2) {
 		*x = player.from_x;
 		*y = player.from_y;
 	} else {
@@ -257,11 +262,19 @@ static int dir_of(uint16_t bits) {
 	return -1;
 }
 
+void game_player_tile(int *x, int *y) { player_tile(x, y); }
+
+/* Two tiles, over an enemy if need be; one if the second is off the floor
+ * or taken. */
 static int try_dodge(int dir) {
 	if (player.stamina <= 0)
 		return 0;
-	int nx = player.x + DX[dir], ny = player.y + DY[dir];
-	if (!inside(nx, ny) || enemy_at(nx, ny) >= 0)
+	int nx = -1, ny = -1;
+	for (int d = DODGE_TILES; d >= 1 && nx < 0; d--) {
+		int tx = player.x + DX[dir] * d, ty = player.y + DY[dir] * d;
+		if (inside(tx, ty) && enemy_at(tx, ty) < 0) { nx = tx; ny = ty; }
+	}
+	if (nx < 0)
 		return 0;
 	player.from_x = player.x;
 	player.from_y = player.y;
@@ -403,7 +416,7 @@ static void update_player(const Input *in) {
 
 	switch (p->state) {
 	case P_DODGE:
-		if (p->t >= STEP_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
+		if (p->t >= DODGE_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
 		break;
 	case P_WALK:
 		if (p->t >= WALK_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
@@ -474,8 +487,9 @@ static void update_player(const Input *in) {
 		if (!swing(0)) p->state = P_IDLE;
 	}
 
-	/* Always facing the nearest enemy, except mid-swing. */
-	if (p->state != P_ATTACK) face_nearest();
+	/* Always facing the nearest enemy, except mid-swing and mid-dodge (it
+	 * turns once it lands, past an enemy it went over). */
+	if (p->state != P_ATTACK && p->state != P_DODGE) face_nearest();
 
 	/* Stamina refills after a short pause. */
 	if (p->stamina_wait > 0) {

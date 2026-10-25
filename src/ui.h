@@ -25,6 +25,8 @@ void settings_defaults(void);
 /* Pad bits (as read) -> the game's own layout (Square attack, Circle dodge,
  * Cross jump, Triangle flask, L1 / R1 skills); the D-pad and Start pass. */
 uint16_t settings_map(uint16_t pad);
+/* The button an action is on now, by name ("CROSS"). */
+const char *action_button(int action);
 
 /* ---- Drawing --------------------------------------------------------------------------- */
 
