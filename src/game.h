@@ -43,7 +43,10 @@ typedef struct {
 } Player;
 
 /* Enemy states. */
-enum { E_NONE, E_IDLE, E_MOVE, E_WINDUP, E_RECOVER, E_STAGGER, E_DYING };
+enum { E_NONE, E_IDLE, E_MOVE, E_WINDUP, E_RECOVER, E_STAGGER, E_DYING, E_SLEEP, E_WAKE };
+/* Kinds: Sloth's husk; a husk asleep until you come near; the bell-ringer,
+ * who keeps to the floor's edge and rings a whole row or column down. */
+enum { K_HUSK, K_SLEEPER, K_BELL };
 
 typedef struct {
 	int32_t state, t;
@@ -52,6 +55,7 @@ typedef struct {
 	int32_t windup, attack;     /* this attack's windup and pattern */
 	uint8_t target[MAX_N * MAX_N];  /* tiles the attack will hit */
 	int32_t hit_t;              /* frames since hit (flash) */
+	int32_t kind;               /* K_* */
 } Enemy;
 
 /* A walking step, one tile (a dodge is 9 frames). */
@@ -80,7 +84,7 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE };
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE, EV_WAKE, EV_BELL };
 typedef struct {
 	int16_t type, x, y;   /* tile */
 } GameEvent;

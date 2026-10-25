@@ -1,0 +1,31 @@
+{
+  "rom": "build/game.cue",
+  "steps": [
+    {"waitUntil": {"address": "boot_magic", "as": "u32", "op": "eq", "value": 1372913665}, "maxFrames": 3000},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 0}, "maxFrames": 3000},
+    {"wait": 60},
+    {"tap": "START"},
+    {"wait": 20},
+    {"name": "title menu: NEW TRIAL", "tap": "CROSS"},
+    {"waitUntil": {"address": "screen", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 300},
+    {"name": "skip to wave II", "write": "wave", "value": 1, "as": "u32"},
+    {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 3000},
+    {"name": "wave II: a husk and a sleeper", "assertRam": "enemies+252", "as": "s32", "equals": 1},
+    {"name": "asleep", "assertRam": "enemies+128", "as": "s32", "equals": 7},
+    {"wait": 60},
+    {"name": "still asleep while the soul keeps away", "assertRam": "enemies+128", "as": "s32", "equals": 7},
+    {"name": "the soul two tiles off", "write": "player", "hex": "06000000 06000000 06000000 06000000 00000000"},
+    {"wait": 4},
+    {"name": "it wakes", "assertRam": "enemies+128", "as": "s32", "equals": 8},
+    {"name": "skip to wave III", "write": "enemies", "value": 0, "as": "u32"},
+    {"write": "enemies+128", "value": 0, "as": "u32"},
+    {"write": "enemies_alive", "value": 0, "as": "u32"},
+    {"waitUntil": {"address": "wave", "as": "s32", "op": "eq", "value": 2}, "maxFrames": 300},
+    {"waitUntil": {"address": "floor_state", "as": "s32", "op": "eq", "value": 1}, "maxFrames": 300},
+    {"name": "wave III: a bell-ringer on the left edge", "assertRam": "enemies+380", "as": "s32", "equals": 2},
+    {"write": "player", "hex": "04000000 06000000 04000000 06000000 00000000"},
+    {"waitUntil": {"address": "enemies+256", "as": "s32", "op": "eq", "value": 3}, "maxFrames": 900},
+    {"name": "it drifted along its edge to the soul's row before ringing", "assertRam": "enemies+268", "as": "s32", "equals": 6},
+    {"assertRam": "enemies+264", "as": "s32", "equals": 0}
+  ]
+}

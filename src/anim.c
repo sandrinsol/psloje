@@ -125,6 +125,47 @@ static const Key HUSK_STAGGER[] = {
 	K(256,-180,  150, -350, -450,   0,   0,   0,   0,   0, -80),
 };
 
+/* Asleep: slumped forward over its knees, arms hanging, breathing slowly. */
+static const Key HUSK_SLEEP[] = {
+	K(0,   880, -150, -420, -460,   0,  60,   0,   0,  26,   0),
+	K(128, 840, -130, -400, -440,   0,  60,   0,   0,  22,   0),
+	K(256, 880, -150, -420, -460,   0,  60,   0,   0,  26,   0),
+};
+/* Waking: rearing up with a roar, arms flung up, then down into its stance. */
+static const Key HUSK_WAKE[] = {
+	K(0,   880, -150, -420, -460,   0,  60,   0,   0,  26,   0),
+	K(100, -80,  320,-1700,-1700,   0,   0,   0,   0,  -6, -90),
+	K(170, -60,  300,-1650,-1650,   0,   0,   0,   0,  -6, -80),
+	K(256, 260, -220, -260, -260,   0,   0,   0,   0,   0,   0),
+};
+
+/* ---- The bell-ringer -------------------------------------------------------------------- */
+/* Parts: body, hood, bell arm, other arm. */
+
+/* Waiting, swaying, the bell held low. */
+static const Key BELL_IDLE[] = {
+	K(0,    60,  -60,  220,  120,   0,   0, -100,   0,   0,   0),
+	K(128,  90,  -40,  260,  150,  40, 120, -120,   0,   3,  10),
+	K(256,  60,  -60,  220,  120,   0,   0, -100,   0,   0,   0),
+};
+/* Gliding a tile along its edge. */
+static const Key BELL_MOVE[] = {
+	K(0,   120,  -80,  300,  160,   0,   0, -100,   0,   0,  50),
+	K(128, 140,  -70,  360,  190,   0,  60, -100,   0,  -6,  60),
+	K(256, 120,  -80,  300,  160,   0,   0, -100,   0,   0,  50),
+};
+/* Ringing: the bell held out and swung side to side (one toll a cycle). */
+static const Key BELL_RING[] = {
+	K(0,    40, -140,  900,  250,   0,   0, -500,   0,   0, -40),
+	K(128,  40, -140, 1000,  250,   0,   0,  500,   0,  -2, -40),
+	K(256,  40, -140,  900,  250,   0,   0, -500,   0,   0, -40),
+};
+/* After: the bell lowered, bowed. */
+static const Key BELL_RECOVER[] = {
+	K(0,   260,  120,  500,  200,   0,   0,    0,   0,   4,  60),
+	K(256,  60,  -60,  220,  120,   0,   0, -100,   0,   0,   0),
+};
+
 const Anim anims[NUM_ANIMS] = {
 	[A_SOUL_IDLE] = { SOUL_IDLE, N(SOUL_IDLE), 1 },
 	[A_SOUL_WALK] = { SOUL_WALK, N(SOUL_WALK), 1 },
@@ -140,6 +181,12 @@ const Anim anims[NUM_ANIMS] = {
 	[A_HUSK_WINDUP] = { HUSK_WINDUP, N(HUSK_WINDUP), 0 },
 	[A_HUSK_RECOVER] = { HUSK_RECOVER, N(HUSK_RECOVER), 0 },
 	[A_HUSK_STAGGER] = { HUSK_STAGGER, N(HUSK_STAGGER), 1 },
+	[A_HUSK_SLEEP] = { HUSK_SLEEP, N(HUSK_SLEEP), 1 },
+	[A_HUSK_WAKE] = { HUSK_WAKE, N(HUSK_WAKE), 0 },
+	[A_BELL_IDLE] = { BELL_IDLE, N(BELL_IDLE), 1 },
+	[A_BELL_MOVE] = { BELL_MOVE, N(BELL_MOVE), 1 },
+	[A_BELL_RING] = { BELL_RING, N(BELL_RING), 1 },
+	[A_BELL_RECOVER] = { BELL_RECOVER, N(BELL_RECOVER), 0 },
 };
 
 /* Smoothstep, k 0..256. */

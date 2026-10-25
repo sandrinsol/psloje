@@ -9,7 +9,7 @@
 #include "models.h"
 #include "figtex.h"
 
-Model soul_model, husk_model, head_statue, hand_statue, pillar_statue;
+Model soul_model, husk_model, bell_model, head_statue, hand_statue, pillar_statue;
 
 static Vec3 vpool[1200], npool[1200];
 static MFace fpool[700];
@@ -190,6 +190,33 @@ void models_init(void) {
 	begin(m, 0, 0, 0, -1);   /* the legs: they stay planted */
 	box(-46, -14, -92, 0, -22, 20, ash2);
 	box(14, 46, -92, 0, -22, 20, ash2);
+
+	/* The bell-ringer: tall, gaunt, in a long dark robe and a pointed hood,
+	 * a bronze bell held out in its right hand. About 210 units. */
+	static const uint8_t shroud[] = { 92, 86, 96 }, shroud2[] = { 70, 66, 74 }, bronze[] = { 176, 132, 72 };
+	static const uint8_t pale[] = { 190, 220, 255 };
+	m = &bell_model;
+	scale = 6554;   /* x 1.6 */
+	mat = MAT_ROBE;
+	begin(m, 0, -60, 0, -1);   /* the robe */
+	prism(6, 0, 0, 40, 16, 0, -150, shroud2, 0, 1);
+	begin(m, 0, -150, 0, BELL_BODY);   /* the hood */
+	prism(5, 0, 4, 22, 0, -146, -206, shroud, 0, 1);
+	mat = MAT_FLAT;
+	plate(-9, 9, -178, -156, 22, dark, 0);
+	plate(-7, -3, -170, -166, 23, pale, 1);
+	plate(3, 7, -170, -166, 23, pale, 1);
+	begin(m, 18, -142, 0, BELL_BODY);   /* the bell arm */
+	mat = MAT_ROBE;
+	box(14, 24, -144, -84, -6, 6, shroud);
+	mat = MAT_FLAT;
+	box(16, 22, -86, -74, -4, 4, skin);
+	mat = MAT_METAL;
+	box(18, 20, -74, -62, -2, 2, bronze);   /* the bell's handle */
+	prism(8, 19, 0, 24, 8, -24, -62, bronze, 1, 0);
+	begin(m, -18, -142, 0, BELL_BODY);  /* the other arm */
+	mat = MAT_ROBE;
+	box(-24, -14, -144, -88, -6, 6, shroud);
 
 	/* Sunken statues in the ash around the floor: a giant head, a raised
 	 * hand, a broken column (units: about 4x the figures). */
