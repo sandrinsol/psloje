@@ -32,7 +32,7 @@ hall reverb. 60 fps. No boss or skills yet.
 
 | Button | Action | Keyboard (web player) |
 |---|---|---|
-| D-pad | Walk a tile at a time (Up = away from the camera) | arrow keys |
+| D-pad or left stick | Walk a tile at a time (Up = away from the camera) | arrow keys |
 | Circle + direction | Dodge that way (invincible frames, stamina) | arrow + Z |
 | Circle | Dodge away from the enemy you face | Z |
 | (automatic) | Face the nearest enemy, along a row or column | |
@@ -42,7 +42,9 @@ hall reverb. 60 fps. No boss or skills yet.
 | X (when judged) | Rise again | X |
 | Start | Pause (options, return to title) | Enter |
 
-The action buttons can be changed in Options > Controls.
+The action buttons can be changed in Options > Controls. A press while busy
+is kept for 12 frames; a dodge or jump cuts a charge or the end of a swing,
+and any action cuts a walk.
 
 ## Play it
 
@@ -87,4 +89,5 @@ effects, synthesised and encoded as SPU ADPCM).
 - `src/main.c`: the screens (title at 640 x 480, the fight at 320 x 240),
   60 fps loop and pad input.
 - `tests/ps1/*.json`: ps1-test scripts (moving and facing, death and the
-  drop, jumping a slam, the heavy blow), run on every push.
+  drop, jumping a slam, the heavy blow, cancels and the analog stick), run
+  on every push.

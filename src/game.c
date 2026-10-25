@@ -28,7 +28,9 @@
 #define DRINK_HEAL_AT   30
 #define FLASK_HEAL      40
 #define FLASKS          3
-#define BUFFER_FRAMES   10
+#define BUFFER_FRAMES   12     /* a press while busy is kept this long */
+#define LIGHT_CANCEL    (ATTACK_WINDUP + 6)   /* a swing's recovery can be cut by a dodge or jump from here */
+#define HEAVY_CANCEL    (HEAVY_WINDUP + 12)
 
 /* Sloth's husk. */
 #define HUSK_HP         60
@@ -355,6 +357,22 @@ static void update_player(const Input *in) {
 		if (p->t == DRINK_HEAL_AT) { p->hp = p->hp + FLASK_HEAL > HP_MAX ? HP_MAX : p->hp + FLASK_HEAL; emit(EV_HEAL, p->x, p->y); }
 		if (p->t >= DRINK_FRAMES) { p->state = P_IDLE; p->t = 0; }
 		break;
+	}
+
+	/* Cancels: a dodge or a jump cuts a charge or the end of a swing; any
+	 * action cuts a walk (back to the tile it left, if not halfway yet). */
+	if (p->buffered != BUF_NONE) {
+		int cancel = 0;
+		if (p->state == P_WALK) cancel = 1;
+		else if (p->state == P_CHARGE) cancel = p->buffered != BUF_ATTACK;
+		else if (p->state == P_ATTACK) cancel = p->buffered != BUF_ATTACK && p->t >= (p->heavy ? HEAVY_CANCEL : LIGHT_CANCEL);
+		if (cancel) {
+			if (p->state == P_WALK && p->t < WALK_FRAMES / 2) { p->x = p->from_x; p->y = p->from_y; }
+			p->from_x = p->x;
+			p->from_y = p->y;
+			p->state = P_IDLE;
+			p->t = 0;
+		}
 	}
 
 	if (p->state == P_IDLE) {

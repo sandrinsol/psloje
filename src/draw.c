@@ -1245,6 +1245,20 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		fy = player.from_y * 16 + (player.y - player.from_y) * 16 * player.t / n;
 	}
 	tile_world(fx, fy, &soul_x, &soul_z);
+	/* A cancelled walk can move the soul back to its tile: glide there
+	 * instead of popping (but jump when the floor starts again). */
+	{
+		static int32_t shown_x, shown_z, off_x, off_z;
+		int dx = soul_x + off_x - shown_x, dz = soul_z + off_z - shown_z;
+		if (floor_t < 2 && floor_state == F_WAVE_INTRO && wave == 0) off_x = off_z = 0;
+		else if (dx * dx + dz * dz > 40 * 40 && dx * dx + dz * dz < 400 * 400) { off_x = shown_x - soul_x; off_z = shown_z - soul_z; }
+		soul_x += off_x;
+		soul_z += off_z;
+		shown_x = soul_x;
+		shown_z = soul_z;
+		off_x = off_x * 5 / 8;
+		off_z = off_z * 5 / 8;
+	}
 
 	/* The soul falls: its light goes out, the colour drains away. */
 	if (floor_state == F_DEAD) {

@@ -98,6 +98,15 @@ static void read_pad(uint16_t *now_out, uint16_t *pressed_out) {
 	uint16_t now = 0;
 	if (pad->stat == 0 && pad->type != 0)
 		now = ~pad->btn;
+	/* An analog pad: the left stick walks too (its stronger axis, past a
+	 * dead zone). */
+	if (pad->stat == 0 && (pad->type == 0x5 || pad->type == 0x7)) {
+		int x = pad->ls_x - 128, y = pad->ls_y - 128;
+		if (x * x + y * y > 72 * 72) {
+			if (x * x > y * y) now |= x > 0 ? PAD_RIGHT : PAD_LEFT;
+			else now |= y > 0 ? PAD_DOWN : PAD_UP;
+		}
+	}
 	*pressed_out = now & ~held;
 	*now_out = now;
 	held = now;
