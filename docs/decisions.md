@@ -34,6 +34,11 @@ What was decided on top of the [design brief](design-brief.md).
 | Triangle | Drink a flask (takes time, you can be hit) |
 | L1 / R1 | The two active skills |
 
+Input: a press while busy is buffered (12 frames); a dodge or jump cancels a
+charge or a swing's recovery (from 6 frames after a light hit, 12 after a
+heavy one); any action cancels a walk (back to the tile it left if not yet
+halfway, gliding there). The left stick walks like the D-pad.
+
 Block and parry were removed after playing: the jump and the charged heavy
 blow took their place. The heavy blow (and later damage skills) breaks a
 husk; any hit on a broken husk is a riposte, 3x damage.
