@@ -22,6 +22,7 @@
 #include "game.h"
 #include "draw.h"
 #include "audio.h"
+#include "music.h"
 #include "ui.h"
 
 #define PRIM_LEN (96 * 1024)
@@ -81,6 +82,7 @@ static void init(void) {
 	draw_init();
 	ui_init();
 	audio_init();   /* before the pads: SpuInit() hangs after StartPAD() */
+	music_init();
 
 	InitPAD(pad_buffers[0], 34, pad_buffers[1], 34);
 	StartPAD();
@@ -115,6 +117,7 @@ static void go_title(void) {
 	title_ready = 0;
 	menu_open(MENU_NONE);
 	fade_to(0, 6);
+	music_play(SONG_TITLE, 120);
 }
 
 static void go_game(void) {
@@ -123,6 +126,7 @@ static void go_game(void) {
 	paused = 0;
 	game_start_floor(0);
 	fade_to(0, 4);
+	music_play(SONG_SLOTH, 90);
 }
 
 static void update(uint16_t now, uint16_t pressed) {
@@ -146,19 +150,20 @@ static void update(uint16_t now, uint16_t pressed) {
 			return;
 		}
 		int r = menu_update(now, pressed);
-		if (r == UI_NEW_GAME) { pending = r; fade_to(255, 8); }
+		if (r == UI_NEW_GAME) { pending = r; fade_to(255, 8); music_level(0, 30); }
 		return;
 	}
 	/* The fight. */
 	if (paused) {
 		int r = menu_update(now, pressed);
-		if (r == UI_RESUME) paused = 0;
-		if (r == UI_QUIT_TO_TITLE) { paused = 0; pending = r; fade_to(255, 8); }
+		if (r == UI_RESUME) { paused = 0; music_level(256, 20); }
+		if (r == UI_QUIT_TO_TITLE) { paused = 0; pending = r; fade_to(255, 8); music_level(0, 30); }
 		return;
 	}
 	if ((pressed & PAD_START) && floor_state != F_DEAD) {
 		paused = 1;
 		menu_open(MENU_PAUSE);
+		music_level(110, 20);   /* quieter while paused */
 		return;
 	}
 	/* Assist: at 3/4 speed every fourth frame waits (inputs carry over);
@@ -172,8 +177,10 @@ static void update(uint16_t now, uint16_t pressed) {
 	carried = 0;
 	game_update(&in);
 	ticked = 1;
-	for (int i = 0; i < num_events; i++)
-		if (game_events[i].type == EV_DEATH) slow_t = 90;
+	for (int i = 0; i < num_events; i++) {
+		if (game_events[i].type == EV_DEATH) { slow_t = 90; music_level(0, 150); }   /* the music dies away */
+		if (game_events[i].type == EV_RISE) music_play(SONG_SLOTH, 120);
+	}
 	audio_events();
 }
 
@@ -188,6 +195,7 @@ int main(int argc, const char **argv) {
 		uint16_t now, pressed;
 		read_pad(&now, &pressed);
 		update(now, pressed);
+		music_update();
 
 		ClearOTagR(b->ot, OT_LEN);
 		uint8_t *prim = b->prims, *end = b->prims + PRIM_LEN - 1024;

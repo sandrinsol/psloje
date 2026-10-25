@@ -52,7 +52,12 @@ husk; any hit on a broken husk is a riposte, 3x damage.
 ## Story and sound
 - Backstory and the 7 memories: drafted by Claude, approved by the author.
 - Memories between floors: text appearing over a still glyph picture.
-- Music and effects: synthesised in code for the SPU.
+- Music and effects: synthesised in code for the SPU. Dark ambient: a song a
+  floor (choir pads, drones, bells, a heartbeat, whispers), a boss theme
+  (organ, drums, choir stabs), the title theme; all through the hall reverb.
+  Voices: whispers in the music, a sigh as the soul rises again, a choir
+  swell on a riposte and when a floor falls silent. The music dies away when
+  the soul falls and is quieter while paused.
 
 ## Milestones
 1. Floor 1 prototype: 9 x 9 grid, dodge-movement, turning, sword, block and

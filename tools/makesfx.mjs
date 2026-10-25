@@ -7,6 +7,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { encode } from './adpcm.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RATE = 22050;
@@ -46,42 +47,6 @@ const SOUNDS = {
   RECOVER: () => mix(sine(0.25, 784, 0.005, 0.12, 0.5), [...Array(len(0.08)).fill(0), ...sine(0.3, 1046, 0.005, 0.12, 0.5)], [...Array(len(0.16)).fill(0), ...sine(0.5, 1568, 0.005, 0.2, 0.45)]),
   TURN: () => lowpass(noiseEnv(0.05, 0.002, 0.012, 0.25), 0.2),
 };
-
-// ---- PS1 ADPCM -------------------------------------------------------------------------
-const F = [[0, 0], [60, 0], [115, -52], [98, -55], [122, -60]];
-function encode(samples) {
-  const out = [];
-  let s1 = 0, s2 = 0;
-  const pcm = samples.map((v) => Math.max(-32768, Math.min(32767, Math.round(v * 32000))));
-  while (pcm.length % 28) pcm.push(0);
-  pcm.push(...Array(28).fill(0));   // a silent block before the end
-  for (let b = 0; b < pcm.length; b += 28) {
-    const block = pcm.slice(b, b + 28);
-    let best = null;
-    for (let f = 0; f < 5; f++) for (let shift = 0; shift <= 12; shift++) {
-      let o1 = s1, o2 = s2, err = 0;
-      const nib = [];
-      for (const x of block) {
-        const pred = Math.floor((o1 * F[f][0] + o2 * F[f][1] + 32) / 64);
-        let n = Math.round(((x - pred) * (1 << shift)) / 4096);
-        n = Math.max(-8, Math.min(7, n));
-        let y = ((n << 12) >> shift) + pred;   // what the SPU will decode
-        y = Math.max(-32768, Math.min(32767, y));
-        err += (y - x) ** 2;
-        nib.push(n & 15);
-        o2 = o1; o1 = y;
-      }
-      if (!best || err < best.err) best = { err, f, shift, nib, o1, o2 };
-    }
-    s1 = best.o1; s2 = best.o2;
-    const bytes = [best.shift | (best.f << 4), 0];
-    for (let i = 0; i < 28; i += 2) bytes.push(best.nib[i] | (best.nib[i + 1] << 4));
-    out.push(bytes);
-  }
-  out[out.length - 1][1] = 1;   // end: the voice stops
-  const buf = Buffer.from(out.flat());
-  return Buffer.concat([buf, Buffer.alloc((64 - (buf.length % 64)) % 64)]);
-}
 
 // Each sound's loudest point (1 = full scale).
 const PEAK = { TURN: 0.2, DODGE: 0.55, WINDUP: 0.6, SWING: 0.7, HEAL: 0.6, RECOVER: 0.6 };

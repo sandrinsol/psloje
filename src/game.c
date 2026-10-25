@@ -564,6 +564,7 @@ void game_update(const Input *in) {
 			drop_x = amount ? x : -1;
 			drop_y = amount ? y : -1;
 			game_start_floor(1);
+			emit(EV_RISE, player.x, player.y);
 		}
 		break;
 	}

@@ -80,7 +80,7 @@ extern int32_t floor_t;     /* frames in the floor's current state */
 
 /* What happened this frame, for sounds and effects. */
 enum { EV_TURN, EV_STEP, EV_DODGE, EV_SWING, EV_HIT, EV_HEAVY, EV_KILL, EV_JUMP, EV_CHARGED, EV_HURT,
-       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE };
+       EV_DEATH, EV_WINDUP, EV_SLAM, EV_HEAL, EV_RECOVER, EV_CLEAR, EV_LAND, EV_RIPOSTE, EV_RISE };
 typedef struct {
 	int16_t type, x, y;   /* tile */
 } GameEvent;

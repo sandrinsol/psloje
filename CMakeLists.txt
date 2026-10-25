@@ -20,7 +20,7 @@ project(
 	DESCRIPTION "GRID SOULS"
 )
 
-psn00bsdk_add_executable(game GPREL src/main.c src/game.c src/draw.c src/models.c src/audio.c src/ui.c src/anim.c)
+psn00bsdk_add_executable(game GPREL src/main.c src/game.c src/draw.c src/models.c src/audio.c src/ui.c src/anim.c src/music.c)
 target_compile_options(game PRIVATE -O2 -Wall -Wno-unused-function -Wno-unused-value)
 # Debian/Ubuntu's mipsel-linux-gnu libgcc is built for MIPS32r2 with hard-float
 # helpers, which the PS1 can't run. Link libmips1rt (64-bit maths and soft-float
@@ -51,6 +51,8 @@ psn00bsdk_target_incbin(game PRIVATE font_large_tim assets/font_large.tim)
 psn00bsdk_target_incbin(game PRIVATE logo_tim assets/logo.tim)
 # Sound effects (tools/makesfx.mjs: SPU ADPCM).
 psn00bsdk_target_incbin(game PRIVATE sfx_bin assets/sfx.bin)
+# Music instruments and voices (tools/makemusic.mjs).
+psn00bsdk_target_incbin(game PRIVATE music_bin assets/music.bin)
 
 psn00bsdk_add_cd_image(
 	iso      # Target name
