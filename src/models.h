@@ -30,6 +30,7 @@ typedef struct {
 	const MFace *faces;
 	int nverts, nfaces;
 	int16_t px, py, pz;      /* pivot */
+	int8_t parent;           /* part it hangs from (turns with it), -1: none */
 } Part;
 
 typedef struct {
@@ -38,15 +39,16 @@ typedef struct {
 } Model;
 
 /* A pose: each part turned about its pivot, pitch (about x, positive =
- * forward/down) then yaw; and the whole model moved. */
+ * forward/down) then yaw, on top of its parent's turn; and the whole model
+ * moved. */
 typedef struct {
 	int16_t pitch[MAX_PARTS], yaw[MAX_PARTS];
 	int16_t dy;               /* whole model up/down */
 	int16_t lean;             /* whole model pitch */
 } Pose;
 
-enum { SOUL_BODY, SOUL_SWORD_ARM, SOUL_ARM };
-enum { HUSK_BODY, HUSK_RIGHT_ARM, HUSK_LEFT_ARM };
+enum { SOUL_BODY, SOUL_HEAD, SOUL_SWORD_ARM, SOUL_ARM };
+enum { HUSK_BODY, HUSK_HEAD, HUSK_RIGHT_ARM, HUSK_LEFT_ARM };
 
 extern Model soul_model, husk_model, head_statue, hand_statue, pillar_statue;
 

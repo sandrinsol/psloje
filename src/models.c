@@ -31,7 +31,7 @@ static int isqrt(int v) {
 	return r;
 }
 
-static void begin(Model *m, int px, int py, int pz) {
+static void begin(Model *m, int px, int py, int pz, int parent) {
 	px = px * scale >> 12; py = py * scale >> 12; pz = pz * scale >> 12;
 	part = &m->parts[m->nparts++];
 	part->verts = &vpool[nv];
@@ -39,6 +39,7 @@ static void begin(Model *m, int px, int py, int pz) {
 	part->faces = &fpool[nf];
 	part->nverts = part->nfaces = 0;
 	part->px = px; part->py = py; part->pz = pz;
+	part->parent = parent;
 }
 
 static int vert(int x, int y, int z) {
@@ -143,16 +144,17 @@ void models_init(void) {
 	static const uint8_t blade[] = { 200, 206, 214 }, hilt[] = { 130, 96, 52 };
 	Model *m = &soul_model;
 	scale = 7373;   /* x 1.8: big enough to read from the camera */
-	begin(m, 0, 0, 0);
+	begin(m, 0, -40, 0, -1);   /* the robe, bending at the hips */
 	mat = MAT_ROBE;
 	prism(6, 0, 0, 52, 28, 0, -112, robe, 0, 1);
 	prism(6, 0, 0, 28, 20, -112, -140, robe2, 1, 0);
+	begin(m, 0, -138, 0, SOUL_BODY);   /* the hood, at the neck */
 	prism(5, 0, 2, 24, 7, -136, -182, hood, 0, 0);
 	mat = MAT_FLAT;
 	plate(-11, 11, -166, -144, 20, dark, 0);
 	plate(-8, -3, -160, -156, 21, eyes, 1);
 	plate(3, 8, -160, -156, 21, eyes, 1);
-	begin(m, 26, -132, 0);   /* sword arm, from the right shoulder */
+	begin(m, 26, -132, 0, SOUL_BODY);   /* sword arm, from the right shoulder */
 	mat = MAT_ROBE;
 	box(20, 32, -134, -84, -7, 7, robe2);
 	mat = MAT_FLAT;
@@ -160,7 +162,7 @@ void models_init(void) {
 	box(18, 34, -78, -72, -8, 8, hilt);
 	mat = MAT_METAL;
 	box(23, 29, -72, 30, -3, 3, blade);
-	begin(m, -26, -132, 0);  /* left arm */
+	begin(m, -26, -132, 0, SOUL_BODY);  /* left arm */
 	mat = MAT_ROBE;
 	box(-32, -20, -134, -84, -7, 7, robe2);
 	mat = MAT_FLAT;
@@ -173,17 +175,18 @@ void models_init(void) {
 	m = &husk_model;
 	scale = 6554;   /* x 1.6 */
 	mat = MAT_ASH;
-	begin(m, 0, -90, 0);
+	begin(m, 0, -90, 0, -1);   /* legs and trunk, bending at the hips */
 	box(-46, -14, -92, 0, -22, 20, ash2);
 	box(14, 46, -92, 0, -22, 20, ash2);
 	box(-62, 62, -206, -88, -52, 48, ash);
+	begin(m, 0, -190, 36, HUSK_BODY);   /* the head, sunk in front of the shoulders */
 	box(-24, 24, -218, -176, 34, 80, ash3);
 	plate(-16, -6, -202, -196, 81, ember, 1);
 	plate(6, 16, -202, -196, 81, ember, 1);
-	begin(m, 66, -196, 0);   /* right arm */
+	begin(m, 66, -196, 0, HUSK_BODY);   /* right arm */
 	box(60, 90, -200, -40, -18, 18, ash);
 	box(56, 96, -44, -6, -26, 26, ash2);
-	begin(m, -66, -196, 0);  /* left arm */
+	begin(m, -66, -196, 0, HUSK_BODY);  /* left arm */
 	box(-90, -60, -200, -40, -18, 18, ash);
 	box(-96, -56, -44, -6, -26, 26, ash2);
 
@@ -193,7 +196,7 @@ void models_init(void) {
 	m = &head_statue;
 	scale = 4096;
 	mat = MAT_FLAT;   /* far off in the haze: untextured is much cheaper to fill */
-	begin(m, 0, 0, 0);
+	begin(m, 0, 0, 0, -1);
 	box(-260, 260, -700, 0, -240, 240, stone);
 	box(-280, 280, -560, -500, 200, 280, stone2);   /* brow */
 	prism(4, 0, 290, 70, 0, -360, -500, stone2, 0, 0);
@@ -201,13 +204,13 @@ void models_init(void) {
 	plate(70, 200, -480, -400, 241, hollow, 0);
 	plate(-120, 120, -260, -220, 241, hollow, 0);
 	m = &hand_statue;
-	begin(m, 0, 0, 0);
+	begin(m, 0, 0, 0, -1);
 	box(-60, 60, -300, 400, -50, 50, stone2);       /* wrist and forearm, rising */
 	box(-110, 110, -560, -300, -60, 60, stone);     /* palm */
 	for (int i = 0; i < 4; i++) box(-104 + i * 54, -62 + i * 54, -800 + (i == 0 || i == 3) * 80, -560, -40, 40, stone);
 	box(110, 170, -500, -360, -40, 40, stone);      /* thumb */
 	m = &pillar_statue;
-	begin(m, 0, 0, 0);
+	begin(m, 0, 0, 0, -1);
 	prism(8, 0, 0, 120, 110, 400, -900, stone, 1, 0);
 	prism(8, 0, 0, 150, 150, -900, -980, stone2, 1, 1);
 	mat = MAT_FLAT;
