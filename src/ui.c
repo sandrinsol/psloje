@@ -575,7 +575,7 @@ int memory_draw(int t, int guilt) {
 		left -= n + 12;   /* a pause between lines */
 		int last = i == MEMORY_LINES;
 		text(w / 2 - text_width(s, FONT_SMALL) / 2, y, shown, FONT_SMALL, last ? 210 : 200, last ? 90 : 190, last ? 80 : 176, 0, 1);
-		y += 24;
+		y += 22;
 	}
 	int done = left > 30;
 	if (done) {
@@ -584,10 +584,10 @@ int memory_draw(int t, int guilt) {
 		time_text(tm, stats.frames);
 		time_text(best, record.best_time);
 		sprintf(line, "TIME %s   DEATHS %d   RIPOSTES %d   FLASKS %d", tm, (int)stats.deaths, (int)stats.ripostes, (int)stats.flasks);
-		text(w / 2, 400, line, FONT_SMALL, 170, 160, 146, 1, 1);
+		text(w / 2, 432, line, FONT_SMALL, 170, 160, 146, 1, 1);
 		sprintf(line, record.best_time == (uint32_t)stats.frames ? "A NEW BEST: %s" : "BEST %s", best);
-		text(w / 2, 420, line, FONT_SMALL, 150, 140, 128, 1, 1);
-		if (t & 32) text(w / 2, 448, "PRESS CROSS", FONT_SMALL, 140, 132, 124, 1, 1);
+		text(w / 2, 450, line, FONT_SMALL, 150, 140, 128, 1, 1);
+		if (t & 32) text(w / 2, 466, "PRESS CROSS", FONT_SMALL, 140, 132, 124, 1, 1);
 	}
 	gradient(0, 0, w, SH(), 16, 14, 18, 4, 4, 6, 8);
 	return done;
