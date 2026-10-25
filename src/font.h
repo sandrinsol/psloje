@@ -4,11 +4,11 @@
 #define FONT_TPAGE_X 768
 #define FONT_TPAGE_Y 0   /* the large font: FONT_TPAGE_Y + 256 */
 #define FONT_CLUT_X  0
-#define FONT_CLUT_Y  482
+#define FONT_CLUT_Y  491
 #define LOGO_TPAGE_X 832
 #define LOGO_TPAGE_Y 0
 #define LOGO_CLUT_X  0
-#define LOGO_CLUT_Y  483
+#define LOGO_CLUT_Y  492
 #define LOGO_W 512
 #define LOGO_H 112
 #define SMALL_W 10

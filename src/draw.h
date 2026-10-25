@@ -10,7 +10,10 @@ typedef struct {
 } Colour;
 
 void draw_init(void);
+/* Uploads a TIM (image and CLUT) to VRAM and waits for it. */
+void load_tim(const uint32_t *data);
 /* The colour behind everything (the void), for the floor. */
 void draw_void_colour(Colour *c);
-/* Adds the frame to the ordering table; returns the next free prim byte. */
-uint8_t *draw_frame(uint32_t *ot, uint8_t *prim, uint8_t *end, int frame);
+/* Adds the frame to the ordering table; returns the next free prim byte.
+ * ticked: the game moved on this frame (not paused or held back). */
+uint8_t *draw_frame(uint32_t *ot, uint8_t *prim, uint8_t *end, int frame, int ticked);

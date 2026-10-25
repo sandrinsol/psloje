@@ -43,6 +43,8 @@ endif()
 # Glyphs (tools/makeglyphs.mjs) and the floor's slabs (tools/makeslabs.mjs).
 psn00bsdk_target_incbin(game PRIVATE glyphs_tim assets/glyphs.tim)
 psn00bsdk_target_incbin(game PRIVATE slabs_tim assets/slabs.tim)
+# Textures for the figures, the sky and effects (tools/makefigtex.mjs).
+psn00bsdk_target_incbin(game PRIVATE figtex_tim assets/figtex.tim)
 # Lettering and the title logo (tools/makefont.py).
 psn00bsdk_target_incbin(game PRIVATE font_small_tim assets/font_small.tim)
 psn00bsdk_target_incbin(game PRIVATE font_large_tim assets/font_large.tim)

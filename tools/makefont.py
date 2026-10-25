@@ -14,8 +14,8 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 TTF = sys.argv[1] if len(sys.argv) > 1 else '/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf'
-FONT_X, FONT_Y, FONT_CLUT = 768, 0, (0, 482)
-LOGO_X, LOGO_Y, LOGO_CLUT = 832, 0, (0, 483)
+FONT_X, FONT_Y, FONT_CLUT = 768, 0, (0, 491)
+LOGO_X, LOGO_Y, LOGO_CLUT = 832, 0, (0, 492)
 CHARS = [chr(c) for c in range(32, 127)]
 
 def to15(r, g, b):

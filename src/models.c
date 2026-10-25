@@ -7,14 +7,18 @@
 #include <stdint.h>
 #include <psxgte.h>
 #include "models.h"
+#include "figtex.h"
 
 Model soul_model, husk_model, head_statue, hand_statue, pillar_statue;
 
-static Vec3 vpool[1200];
+static Vec3 vpool[1200], npool[1200];
 static MFace fpool[700];
+static int16_t fbase[700];   /* each face's part's first vertex in vpool */
 static int nv, nf;
 static Part *part;
 static int scale = 4096;   /* this model's size, 4096 = as written */
+static int mat = MAT_FLAT;   /* for the faces that follow */
+static int smooth;           /* prism sides */
 
 static int isqrt(int v) {
 	int r = 0, bit = 1 << 30;
@@ -31,6 +35,7 @@ static void begin(Model *m, int px, int py, int pz) {
 	px = px * scale >> 12; py = py * scale >> 12; pz = pz * scale >> 12;
 	part = &m->parts[m->nparts++];
 	part->verts = &vpool[nv];
+	part->normals = &npool[nv];
 	part->faces = &fpool[nf];
 	part->nverts = part->nfaces = 0;
 	part->px = px; part->py = py; part->pz = pz;
@@ -43,9 +48,12 @@ static int vert(int x, int y, int z) {
 }
 
 static void face(int a, int b, int c, int d, int r, int g, int bl, int glow) {
+	fbase[nf] = part->verts - vpool;
 	MFace *f = &fpool[nf++];
 	f->v[0] = a; f->v[1] = b; f->v[2] = c; f->v[3] = d < 0 ? 255 : d;
 	f->r = r; f->g = g; f->b = bl; f->glow = glow;
+	f->mat = glow ? MAT_FLAT : mat;
+	f->smooth = smooth;
 	/* Outward normal: (BL - TL) x (TR - TL), seen from outside. */
 	const Vec3 *p = part->verts;
 	int ux = p[b].x - p[a].x, uy = p[b].y - p[a].y, uz = p[b].z - p[a].z;
@@ -56,6 +64,28 @@ static void face(int a, int b, int c, int d, int r, int g, int bl, int glow) {
 	if (!len) len = 1;
 	f->nx = nx * 4096 / len; f->ny = ny * 4096 / len; f->nz = nz * 4096 / len;
 	part->nfaces++;
+}
+
+/* Vertex normals: the average of the smooth faces around each vertex. */
+static void smooth_normals(void) {
+	static int32_t acc[1200][3];
+	for (int i = 0; i < nv; i++) acc[i][0] = acc[i][1] = acc[i][2] = 0;
+	for (int fi = 0; fi < nf; fi++) {
+		const MFace *f = &fpool[fi];
+		if (!f->smooth) continue;
+		int base = fbase[fi];   /* the part's first vertex */
+		for (int k = 0; k < (f->v[3] == 255 ? 3 : 4); k++) {
+			int32_t *a = acc[base + f->v[k]];
+			a[0] += f->nx; a[1] += f->ny; a[2] += f->nz;
+		}
+	}
+	for (int i = 0; i < nv; i++) {
+		int x = acc[i][0], y = acc[i][1], z = acc[i][2];
+		while (x > 30000 || x < -30000 || y > 30000 || y < -30000 || z > 30000 || z < -30000) { x >>= 1; y >>= 1; z >>= 1; }
+		int len = isqrt(x * x + y * y + z * z);
+		if (!len) { npool[i].x = 0; npool[i].y = -4096; npool[i].z = 0; continue; }
+		npool[i].x = x * 4096 / len; npool[i].y = y * 4096 / len; npool[i].z = z * 4096 / len;
+	}
 }
 
 #define RGB(c) (c)[0], (c)[1], (c)[2]
@@ -82,11 +112,13 @@ static void prism(int n, int cx, int cz, int r0, int r1, int y0, int y1, const u
 		hi[i] = r1 ? vert(cx + (r1 * s >> 12), y1, cz + (r1 * co >> 12)) : -1;
 	}
 	int apex = r1 ? -1 : vert(cx, y1, cz);
+	smooth = 1;   /* round sides, flat caps */
 	for (int i = 0; i < n; i++) {
 		int j = (i + 1) % n;
 		if (r1) face(hi[j], hi[i], lo[j], lo[i], RGB(c), 0);
 		else face(apex, lo[i], lo[j], -1, RGB(c), 0);
 	}
+	smooth = 0;
 	if (top && r1) {
 		int m = vert(cx, y1, cz);
 		for (int i = 0; i < n; i++) face(m, hi[i], hi[(i + 1) % n], -1, RGB(c), 0);
@@ -112,19 +144,26 @@ void models_init(void) {
 	Model *m = &soul_model;
 	scale = 7373;   /* x 1.8: big enough to read from the camera */
 	begin(m, 0, 0, 0);
+	mat = MAT_ROBE;
 	prism(6, 0, 0, 52, 28, 0, -112, robe, 0, 1);
 	prism(6, 0, 0, 28, 20, -112, -140, robe2, 1, 0);
 	prism(5, 0, 2, 24, 7, -136, -182, hood, 0, 0);
+	mat = MAT_FLAT;
 	plate(-11, 11, -166, -144, 20, dark, 0);
 	plate(-8, -3, -160, -156, 21, eyes, 1);
 	plate(3, 8, -160, -156, 21, eyes, 1);
 	begin(m, 26, -132, 0);   /* sword arm, from the right shoulder */
+	mat = MAT_ROBE;
 	box(20, 32, -134, -84, -7, 7, robe2);
+	mat = MAT_FLAT;
 	box(21, 31, -86, -76, -6, 6, skin);
 	box(18, 34, -78, -72, -8, 8, hilt);
+	mat = MAT_METAL;
 	box(23, 29, -72, 30, -3, 3, blade);
 	begin(m, -26, -132, 0);  /* left arm */
+	mat = MAT_ROBE;
 	box(-32, -20, -134, -84, -7, 7, robe2);
+	mat = MAT_FLAT;
 	box(-31, -21, -86, -76, -6, 6, skin);
 
 	/* Sloth's husk: a hunched grey giant, arms hanging to the floor, a small
@@ -133,6 +172,7 @@ void models_init(void) {
 	static const uint8_t ember[] = { 230, 170, 80 };
 	m = &husk_model;
 	scale = 6554;   /* x 1.6 */
+	mat = MAT_ASH;
 	begin(m, 0, -90, 0);
 	box(-46, -14, -92, 0, -22, 20, ash2);
 	box(14, 46, -92, 0, -22, 20, ash2);
@@ -152,6 +192,7 @@ void models_init(void) {
 	static const uint8_t stone[] = { 112, 108, 104 }, stone2[] = { 88, 84, 82 }, hollow[] = { 24, 22, 24 };
 	m = &head_statue;
 	scale = 4096;
+	mat = MAT_FLAT;   /* far off in the haze: untextured is much cheaper to fill */
 	begin(m, 0, 0, 0);
 	box(-260, 260, -700, 0, -240, 240, stone);
 	box(-280, 280, -560, -500, 200, 280, stone2);   /* brow */
@@ -169,4 +210,6 @@ void models_init(void) {
 	begin(m, 0, 0, 0);
 	prism(8, 0, 0, 120, 110, 400, -900, stone, 1, 0);
 	prism(8, 0, 0, 150, 150, -900, -980, stone2, 1, 1);
+	mat = MAT_FLAT;
+	smooth_normals();
 }
