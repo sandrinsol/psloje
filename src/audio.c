@@ -54,7 +54,7 @@ void audio_events(void) {
 		[EV_TURN] = SFX_TURN, [EV_STEP] = SFX_TURN, [EV_DODGE] = SFX_DODGE, [EV_SWING] = SFX_SWING, [EV_HIT] = SFX_HIT,
 		[EV_HEAVY] = SFX_RIPOSTE, [EV_KILL] = SFX_KILL, [EV_JUMP] = SFX_DODGE, [EV_CHARGED] = SFX_PARRY, [EV_LAND] = SFX_TURN, [EV_RIPOSTE] = SFX_RIPOSTE,
 		[EV_HURT] = SFX_HURT, [EV_DEATH] = SFX_DEATH, [EV_WINDUP] = SFX_WINDUP, [EV_SLAM] = SFX_SLAM,
-		[EV_HEAL] = SFX_HEAL, [EV_RECOVER] = SFX_RECOVER, [EV_CLEAR] = SFX_RECOVER, [EV_RISE] = -1,
+		[EV_HEAL] = SFX_HEAL, [EV_RECOVER] = SFX_RECOVER, [EV_CLEAR] = SFX_RECOVER, [EV_RISE] = -1, [EV_BELL] = -1, [EV_WAKE] = SFX_WINDUP,
 	};
 	for (int i = 0; i < num_events; i++) {
 		int t = game_events[i].type;
@@ -66,5 +66,7 @@ void audio_events(void) {
 		 * silent; the soul sighs as it rises again. */
 		if (t == EV_RIPOSTE || t == EV_CLEAR) music_voice(INST_SWELL, 57, 0x2c00, 0);
 		if (t == EV_RISE) music_voice(INST_SIGH, 60, 0x3000, 0);
+		if (t == EV_BELL) music_voice(INST_BELL, 64 + (game_frames / 20) % 2 * 3, 0x3400, (game_events[i].x - 4) * 12);   /* a toll, from its side */
+		if (t == EV_WAKE) audio_play(SFX_SLAM, 0x3000, 2800);   /* a low roar */
 	}
 }

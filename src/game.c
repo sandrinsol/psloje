@@ -41,9 +41,17 @@
 #define HUSK_STAGGER    60
 #define HUSK_DYING      30
 #define HUSK_REWARD     40
+#define WAKE_RANGE      2      /* a sleeper wakes when you come this near (or strike it) */
+#define WAKE_FRAMES     45
+#define SLEEP_FACTOR    2      /* a blow on a sleeper */
+#define BELL_HP         40
+#define BELL_IDLE       40
+#define BELL_MOVE       30
+#define BELL_WINDUP     80     /* four tolls */
+#define BELL_RECOVER    50
 #define BRIGHT_FRAMES   15     /* the last frames of a windup: bright */
 
-enum { ATK_SLAM, ATK_LINE, ATK_CROSS };
+enum { ATK_SLAM, ATK_LINE, ATK_CROSS, ATK_RING };
 
 int32_t grid_n = 9;
 Player player;
@@ -101,9 +109,13 @@ static int enemy_at(int x, int y) {
 
 /* ---- Floor -------------------------------------------------------------------- */
 
-static const int WAVES[] = { 1, 2, 3 };
+/* Each wave: up to 3 of { kind, x, y }. */
 #define NUM_WAVES 3
-static const int8_t SPAWNS[][2] = { { 4, 1 }, { 1, 2 }, { 7, 2 }, { 2, 0 }, { 6, 0 }, { 4, 3 } };
+static const int8_t WAVES[NUM_WAVES][3][3] = {
+	{ { K_HUSK, 4, 1 }, { -1 }, { -1 } },
+	{ { K_HUSK, 1, 2 }, { K_SLEEPER, 6, 4 }, { -1 } },
+	{ { K_HUSK, 2, 0 }, { K_HUSK, 6, 0 }, { K_BELL, 0, 4 } },
+};
 
 void game_start_floor(int keep_drop) {
 	grid_n = 9;
@@ -128,16 +140,20 @@ void game_start_floor(int keep_drop) {
 }
 
 static void spawn_wave(void) {
-	int n = WAVES[wave];
-	for (int i = 0; i < n && i < MAX_ENEMIES; i++) {
-		Enemy *e = &enemies[i];
+	int n = 0;
+	for (int i = 0; i < 3; i++) {
+		const int8_t *w = WAVES[wave][i];
+		if (w[0] < 0) continue;
+		Enemy *e = &enemies[n];
 		memset(e, 0, sizeof(*e));
-		e->state = E_IDLE;
-		e->t = -i * 25;   /* not all at once */
-		e->x = e->from_x = SPAWNS[i][0];
-		e->y = e->from_y = SPAWNS[i][1];
-		e->hp = HUSK_HP;
+		e->kind = w[0];
+		e->state = e->kind == K_SLEEPER ? E_SLEEP : E_IDLE;
+		e->t = -n * 25;   /* not all at once */
+		e->x = e->from_x = w[1];
+		e->y = e->from_y = w[2];
+		e->hp = e->kind == K_BELL ? BELL_HP : HUSK_HP;
 		e->hit_t = 999;
+		n++;
 	}
 	enemies_alive = n;
 }
@@ -278,8 +294,8 @@ static void sword_hits(void) {
 	if (i < 0)
 		return;
 	Enemy *e = &enemies[i];
-	int heavy = player.heavy, riposte = e->state == E_STAGGER;
-	e->hp -= (heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE) * (riposte ? RIPOSTE_FACTOR : 1);
+	int heavy = player.heavy, riposte = e->state == E_STAGGER, asleep = e->state == E_SLEEP;
+	e->hp -= (heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE) * (riposte ? RIPOSTE_FACTOR : asleep ? SLEEP_FACTOR : 1);
 	e->hit_t = 0;
 	shake_t = riposte ? 12 : heavy ? 8 : 3;
 	hitstop(riposte ? 12 : heavy ? 9 : 4);
@@ -290,6 +306,10 @@ static void sword_hits(void) {
 		absolution += HUSK_REWARD;
 		enemies_alive--;
 		emit(EV_KILL, tx, ty);
+	} else if (asleep) {
+		e->state = E_WAKE;      /* a rude awakening */
+		e->t = 0;
+		emit(EV_WAKE, tx, ty);
 	} else if (riposte) {
 		e->state = E_IDLE;      /* the opening is spent */
 		e->t = 0;
@@ -444,6 +464,12 @@ static void start_attack(Enemy *e, int kind) {
 		e->windup = 65;
 		break;
 	}
+	case ATK_RING: { /* the bell: across the whole floor from its edge */
+		int dx = e->x == 0 ? 1 : e->x == grid_n - 1 ? -1 : 0, dy = dx ? 0 : e->y == 0 ? 1 : -1;
+		for (int k = 1; k < grid_n; k++) mark(e, e->x + dx * k, e->y + dy * k);
+		e->windup = BELL_WINDUP;
+		break;
+	}
 	case ATK_CROSS:  /* its whole row and column */
 		for (int k = 0; k < grid_n; k++) {
 			if (k != e->x) mark(e, k, e->y);
@@ -465,8 +491,39 @@ static void update_enemy(Enemy *e) {
 	int px, py;
 	player_tile(&px, &py);
 	switch (e->state) {
+	case E_SLEEP: {
+		int dx = px - e->x, dy = py - e->y;
+		if (dx < 0) dx = -dx;
+		if (dy < 0) dy = -dy;
+		if ((dx > dy ? dx : dy) <= WAKE_RANGE && player.state != P_DEAD) {
+			e->state = E_WAKE;
+			e->t = 0;
+			shake_t = shake_t > 6 ? shake_t : 6;
+			emit(EV_WAKE, e->x, e->y);
+		}
+		break;
+	}
+	case E_WAKE:
+		if (e->t >= WAKE_FRAMES) { e->state = E_IDLE; e->t = HUSK_IDLE; }   /* and straight at you */
+		break;
 	case E_IDLE: {
-		if (e->t < HUSK_IDLE || player.state == P_DEAD)
+		if (player.state == P_DEAD)
+			break;
+		if (e->kind == K_BELL) {
+			/* Keeps to its edge: lines up with the soul, then rings. */
+			if (e->t < BELL_IDLE) break;
+			int side = e->x == 0 || e->x == grid_n - 1;   /* on a side edge: rings rows */
+			int want = side ? py : px, at = side ? e->y : e->x;
+			if (want == at) { start_attack(e, ATK_RING); break; }
+			int nx = e->x + (side ? 0 : want > at ? 1 : -1), ny = e->y + (side ? (want > at ? 1 : -1) : 0);
+			e->t = 0;
+			if (!inside(nx, ny) || enemy_at(nx, ny) >= 0 || (nx == player.x && ny == player.y) || (nx == px && ny == py)) break;
+			e->from_x = e->x; e->from_y = e->y;
+			e->x = nx; e->y = ny;
+			e->state = E_MOVE;
+			break;
+		}
+		if (e->t < HUSK_IDLE)
 			break;
 		int dx = px - e->x, dy = py - e->y, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
 		int cheb = adx > ady ? adx : ady;
@@ -496,9 +553,10 @@ static void update_enemy(Enemy *e) {
 		break;
 	}
 	case E_MOVE:
-		if (e->t >= HUSK_MOVE) { e->state = E_IDLE; e->t = 0; e->from_x = e->x; e->from_y = e->y; }
+		if (e->t >= (e->kind == K_BELL ? BELL_MOVE : HUSK_MOVE)) { e->state = E_IDLE; e->t = 0; e->from_x = e->x; e->from_y = e->y; }
 		break;
 	case E_WINDUP:
+		if (e->attack == ATK_RING && e->t % 20 == 1) emit(EV_BELL, e->x, e->y);   /* each toll */
 		if (e->t >= e->windup) {
 			player_tile(&px, &py);
 			if (e->target[py * MAX_N + px]) player_hit(e->x, e->y, HUSK_DAMAGE);
@@ -509,7 +567,7 @@ static void update_enemy(Enemy *e) {
 		}
 		break;
 	case E_RECOVER:
-		if (e->t >= HUSK_RECOVER + rnd(20)) { e->state = E_IDLE; e->t = 0; }
+		if (e->t >= (e->kind == K_BELL ? BELL_RECOVER : HUSK_RECOVER + rnd(20))) { e->state = E_IDLE; e->t = 0; }
 		break;
 	case E_STAGGER:
 		if (e->t >= HUSK_STAGGER) { e->state = E_IDLE; e->t = 0; }

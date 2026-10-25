@@ -43,6 +43,17 @@ Block and parry were removed after playing: the jump and the charged heavy
 blow took their place. The heavy blow (and later damage skills) breaks a
 husk; any hit on a broken husk is a riposte, 3x damage.
 
+## Enemies (Floor 1, Sloth)
+- Husk: slow and heavy; slam (the 8 tiles around), line (4 tiles), cross
+  (its row and column), every blow telegraphed on the slabs.
+- Sleeper: a husk asleep until the soul comes within 2 tiles or strikes it
+  (double damage in its sleep); wakes with a roar and attacks at once.
+- Bell-ringer: keeps to the floor's edge, drifts along it to line up with
+  the soul, and tolls its bell four times before a whole row (or column)
+  comes down. Frail (40 hp).
+- Waves: I a husk; II a husk and a sleeper; III two husks and a bell-ringer.
+- One fixed difficulty (the assists: game speed in Options).
+
 ## Death and progression
 - Each floor: waves of enemies, then the boss. Dying restarts the floor.
 - Absolution drops where you die; reach it to recover it; die first and it's gone.

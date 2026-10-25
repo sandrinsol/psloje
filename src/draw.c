@@ -1162,7 +1162,20 @@ static void husk_pose(int i, Pose *ps) {
 	const Enemy *e = &enemies[i];
 	Animator *an = &husk_anim[i];
 	int phase = i * 37;   /* not all breathing together */
+	if (e->kind == K_BELL) {
+		switch (e->state) {
+		case E_MOVE:    animate(an, E_MOVE, A_BELL_MOVE, e->t, 30, BLEND_FRAMES, ps); break;
+		case E_WINDUP:  animate(an, E_WINDUP, A_BELL_RING, e->t, 20, 6, ps); break;
+		case E_RECOVER: animate(an, E_RECOVER, A_BELL_RECOVER, e->t, 50, 3, ps); break;
+		case E_STAGGER: animate(an, E_STAGGER, A_BELL_RECOVER, 0, 50, 4, ps); ps->lean -= 150; break;
+		case E_DYING:   *ps = an->last; break;
+		default:        animate(an, E_IDLE, A_BELL_IDLE, game_frames + phase, 110, BLEND_FRAMES, ps); break;
+		}
+		return;
+	}
 	switch (e->state) {
+	case E_SLEEP:   animate(an, E_SLEEP, A_HUSK_SLEEP, game_frames + phase, 150, 0, ps); break;
+	case E_WAKE:    animate(an, E_WAKE, A_HUSK_WAKE, e->t, 45, 0, ps); break;
 	case E_MOVE:    animate(an, E_MOVE, A_HUSK_MOVE, e->t, 36, BLEND_FRAMES, ps); break;
 	case E_WINDUP:
 		animate(an, E_WINDUP, A_HUSK_WINDUP, e->t, e->windup, 8, ps);
@@ -1222,6 +1235,15 @@ static void handle_events(void) {
 			break;
 		case EV_DEATH:
 			burst(e->x, e->y, 30, 170, 180, 220, 6, 90);
+			break;
+		case EV_WAKE:
+			burst(e->x, e->y, 10, 255, 130, 50, 6, 200);
+			light_tile(e->x, e->y, 255, 120, 40, 22, 30);
+			break;
+		case EV_BELL:
+			/* A toll: a pale flash at the bell. */
+			light_tile(e->x, e->y, 200, 210, 255, 26, 14);
+			burst(e->x, e->y, 4, 200, 220, 255, 5, 150);
 			break;
 		case EV_HEAL:
 			light_tile(player.x, player.y, 120, 220, 170, 26, 40);
@@ -1302,8 +1324,9 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 		if (e->state == E_NONE) { enemy_yaw[i] = -1; husk_anim[i].state = -1; continue; }
 		int ex = e->x * 16, ey = e->y * 16;
 		if (e->state == E_MOVE) {
-			ex = e->from_x * 16 + (e->x - e->from_x) * 16 * e->t / 36;
-			ey = e->from_y * 16 + (e->y - e->from_y) * 16 * e->t / 36;
+			int n = e->kind == K_BELL ? 30 : 36;
+			ex = e->from_x * 16 + (e->x - e->from_x) * 16 * e->t / n;
+			ey = e->from_y * 16 + (e->y - e->from_y) * 16 * e->t / n;
 		}
 		int x, z;
 		tile_world(ex, ey, &x, &z);
@@ -1314,22 +1337,26 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 			want = adx > adz ? (dx > 0 ? 1024 : 3072) : (dz > 0 ? 0 : 2048);
 		}
 		if (enemy_yaw[i] < 0) enemy_yaw[i] = want;
-		if (e->state != E_WINDUP && e->state != E_RECOVER) enemy_yaw[i] = ease_angle(enemy_yaw[i], want, 6);
+		if (e->state != E_WINDUP && e->state != E_RECOVER && e->state != E_SLEEP) enemy_yaw[i] = ease_angle(enemy_yaw[i], want, 6);
 		Pose ps;
 		husk_pose(i, &ps);
 		/* Killed: a white flash, then it's the stone chunks. */
 		if (e->state == E_DYING && e->t > 3) continue;
 		int tint = e->hit_t < 5 || e->state == E_DYING ? 1 : e->state == E_STAGGER ? 3 : 0;
 		model_red = e->x >= 0 && e->x < grid_n && e->y >= 0 && e->y < grid_n ? tele[e->y][e->x] / 3 : 0;
-		draw_model(&husk_model, &ps, x, 0, z, enemy_yaw[i], 256, tint, 256, 0);
-		shadow(x, z, 110);
+		/* A sleeper's embers burn low; waking, they flare. */
+		model_glow = e->state == E_SLEEP ? 50 : e->state == E_WAKE ? 256 + 200 * (45 - e->t) / 45 : 256;
+		draw_model(e->kind == K_BELL ? &bell_model : &husk_model, &ps, x, 0, z, enemy_yaw[i], 256, tint, 256, 0);
+		model_glow = 256;
+		shadow(x, z, e->kind == K_BELL ? 80 : 110);
 		/* Health over it once hurt. */
-		if (e->hp < 60 && e->state != E_DYING) {
+		int hp_max = e->kind == K_BELL ? 40 : 60;
+		if (e->hp < hp_max && e->state != E_DYING) {
 			Proj p;
 			project(x, -270, z, &p);
 			if (p.z > NEAR_Z) {
 				box2d(2, p.x - 12, p.y, 24, 3, 30, 10, 10);
-				box2d(1, p.x - 12, p.y, e->hp * 24 / 60, 3, 200, 40, 40);
+				box2d(1, p.x - 12, p.y, e->hp * 24 / hp_max, 3, 200, 40, 40);
 			}
 		}
 	}

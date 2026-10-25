@@ -16,9 +16,12 @@ The figures are textured and lit by the GTE: the sky, the soul's light,
 flashes from parries and hits, the red of a telegraph under them; soft round
 shadows. Killed husks shatter into stone and embers; when the soul falls the
 game slows, its light goes out and the colour drains away.
-A fixed camera looks at the whole floor from the south, high and tilted. Three waves of husks raise
+A fixed camera looks at the whole floor from the south, high and tilted. Three waves: husks that raise
 their arms over their heads, and the runes of the slabs they're about to
-hit glow, then burn (your own slab flashes red). Walk with the D-pad, dodge with
+hit glow, then burn (your own slab flashes red); a sleeper slumped on the
+floor that wakes with a roar when you come near (a blow in its sleep does
+double); a bell-ringer that keeps to the floor's edge, lines up with you and
+tolls its bell to bring a whole row down. Walk with the D-pad, dodge with
 Circle; the soul always faces the nearest husk. Jump over the blows that
 hit the ground, strike, or hold to charge a heavy blow that breaks a husk,
 then riposte it for triple damage; drink flasks, die, rise again and fetch
@@ -89,5 +92,5 @@ effects, synthesised and encoded as SPU ADPCM).
 - `src/main.c`: the screens (title at 640 x 480, the fight at 320 x 240),
   60 fps loop and pad input.
 - `tests/ps1/*.json`: ps1-test scripts (moving and facing, death and the
-  drop, jumping a slam, the heavy blow, cancels and the analog stick), run
-  on every push.
+  drop, jumping a slam, the heavy blow, cancels and the analog stick, the
+  sleeper and the bell-ringer), run on every push.
