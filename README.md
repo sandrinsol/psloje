@@ -6,8 +6,8 @@ seven sins of an afterlife trial. See [docs/design-brief.md](docs/design-brief.m
 and [docs/decisions.md](docs/decisions.md).
 
 **Status: Floor 1 prototype, in 3D.** A title screen (the name carved in
-stone, 640 x 480), menus (pause, options with volume, a wider parry window
-and a slower game speed as assists, button remapping, credits), a carved
+stone, 640 x 480), menus (pause, options with volume, a slower game speed
+as an assist, button remapping, credits), a carved
 stone HUD in the game's own serif lettering, fades and a slow zoom onto the
 floor as it begins. The 9 x 9 floor of Sloth: carved rune
 slabs floating over a sea of ash, sunken statues in the haze, ash falling,
@@ -19,7 +19,8 @@ game slows, its light goes out and the colour drains away.
 A fixed camera looks at the whole floor from the south, high and tilted. Three waves of husks raise
 their arms over their heads, and the runes of the slabs they're about to
 hit glow, then burn (your own slab flashes red). Walk with the D-pad, dodge with
-Circle; the soul always faces the nearest husk. Block, parry and riposte, drink flasks, die, rise again and fetch
+Circle; the soul always faces the nearest husk. Jump over the blows that
+hit the ground, strike, or hold to charge a heavy blow that staggers; drink flasks, die, rise again and fetch
 the absolution you dropped. Hit-stop, camera kicks, ash bursts and
 synthesised sound effects. When the floor is won its outer ring breaks away.
 60 fps. No boss, music or skills yet.
@@ -32,8 +33,8 @@ synthesised sound effects. When the floor is won its outer ring breaks away.
 | Circle + direction | Dodge that way (invincible frames, stamina) | arrow + Z |
 | Circle | Dodge away from the enemy you face | Z |
 | (automatic) | Face the nearest enemy, along a row or column | |
-| X | Attack (sword: the tile in front) | X |
-| Square | Block; press just before a hit to parry | S |
+| Square | Attack (sword: the tile in front); hold to charge a heavy blow | S |
+| X | Jump in place: ground attacks miss while you're in the air (stamina) | X |
 | Triangle | Drink a flask | A |
 | X (when judged) | Rise again | X |
 | Start | Pause (options, return to title) | Enter |
@@ -62,8 +63,8 @@ effects, synthesised and encoded as SPU ADPCM).
 
 ## Code
 
-- `src/game.c`: the rules: player (turning, dodges, sword, block and parry,
-  stamina, flasks), husks (moving, telegraphed slam / line / cross attacks,
+- `src/game.c`: the rules: player (facing, walking, dodges, jumps, sword
+  and charged blow, stamina, flasks), husks (moving, telegraphed slam / line / cross attacks,
   stagger), waves, death and the absolution drop.
 - `src/draw.c`: the 3D scene: the fixed camera, the sky (clouds, the eye,
   lightning), the slabs (soul light, flashes, telegraph glow, fog, the
@@ -78,4 +79,4 @@ effects, synthesised and encoded as SPU ADPCM).
 - `src/main.c`: the screens (title at 640 x 480, the fight at 320 x 240),
   60 fps loop and pad input.
 - `tests/ps1/*.json`: ps1-test scripts (moving and facing, death and the
-  drop, parry and riposte), run on every push.
+  drop, jumping a slam, the heavy blow), run on every push.

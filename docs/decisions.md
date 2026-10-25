@@ -29,10 +29,13 @@ What was decided on top of the [design brief](design-brief.md).
 | Circle + direction | Dodge that way (9 frames, 6 invincible, 25 % stamina) |
 | Circle alone | Dodge away from the enemy you face |
 | (automatic) | Face the nearest enemy along a row or column; exactly diagonal: keep facing |
-| X | Attack: windup, hit, recovery; stamina |
-| Square | Block (stamina per hit); pressed within 6 frames before a hit: parry, then a riposte does 3x damage |
+| Square | Attack: windup, hit, recovery; stamina. Held 30 frames: a heavy blow (2.5x damage, staggers), on release |
+| X | Jump in place (28 frames, airborne 3..21: ground attacks miss; 20 % stamina) |
 | Triangle | Drink a flask (takes time, you can be hit) |
 | L1 / R1 | The two active skills |
+
+Block and parry (and the riposte) were removed after playing: the jump and
+the charged heavy blow took their place.
 
 ## Death and progression
 - Each floor: waves of enemies, then the boss. Dying restarts the floor.

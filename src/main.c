@@ -3,8 +3,8 @@
  *
  * The title screen and menus run at 640 x 480 (interlaced), the fight at
  * 320 x 240, 60 fps. Controls in the fight (remappable in Options): the
- * D-pad walks, Circle (+ a direction) dodges, Cross attacks, Square blocks
- * (a press just before a hit parries), Triangle drinks a flask, Start pauses.
+ * D-pad walks, Circle (+ a direction) dodges, Cross jumps, Square attacks
+ * (held: a heavy blow), Triangle drinks a flask, Start pauses.
  *
  * Variables the test harness reads by name (see ps1test.json):
  *   boot_magic, frame_count, cpu_usage, fps, screen
@@ -170,7 +170,6 @@ static void update(uint16_t now, uint16_t pressed) {
 	}
 	Input in = { settings_map(now), settings_map(pressed | carried) };
 	carried = 0;
-	parry_wide = settings.parry_wide;
 	game_update(&in);
 	ticked = 1;
 	for (int i = 0; i < num_events; i++)

@@ -16,14 +16,13 @@
 #define ATTACK_FRAMES   22
 #define ATTACK_COST     (12 * 16)
 #define ATTACK_DAMAGE   20
-#define RIPOSTE_FACTOR  3      /* hitting a staggered enemy */
-#define BLOCK_COST      (22 * 16)
-#define PARRY_WINDOW    6      /* Square pressed this many frames or less before the hit */
-#define PARRY_WIDE      10     /* with the assist option */
-#define GUARD_BREAK     40
+#define HEAVY_WINDUP    6      /* charged: hits on frame 6 of the swing */
+#define HEAVY_FRAMES    30
+#define HEAVY_COST      (30 * 16)
+#define HEAVY_DAMAGE    50     /* and it staggers */
+#define JUMP_COST       (20 * 16)
 #define STAMINA_REGEN   13     /* /16 a frame: ~49 a second */
 #define STAMINA_WAIT    15
-#define BLOCK_REGEN     4
 #define DRINK_FRAMES    45
 #define DRINK_HEAL_AT   30
 #define FLASK_HEAL      40
@@ -36,7 +35,7 @@
 #define HUSK_IDLE       50
 #define HUSK_MOVE       36
 #define HUSK_RECOVER    45
-#define HUSK_STAGGER    90
+#define HUSK_STAGGER    60
 #define HUSK_DYING      30
 #define HUSK_REWARD     40
 #define BRIGHT_FRAMES   15     /* the last frames of a windup: bright */
@@ -55,7 +54,6 @@ int32_t hitstop_t;
 GameEvent game_events[MAX_EVENTS];
 int32_t num_events;
 int32_t floor_t;   /* frames in the floor's current state */
-int32_t parry_wide;
 
 static uint16_t held_pressed;   /* buttons pressed during a hit-stop */
 
@@ -113,9 +111,7 @@ void game_start_floor(int keep_drop) {
 	player.hp = HP_MAX;
 	player.stamina = STAMINA_MAX * 16;
 	player.flasks = FLASKS;
-	player.parry_t = 999;
 	player.hurt_t = 999;
-	player.parried_t = 999;
 	memset(enemies, 0, sizeof(enemies));
 	if (!keep_drop) {
 		drop_x = drop_y = -1;
@@ -166,52 +162,29 @@ static void die(void) {
 	emit(EV_DEATH, player.x, player.y);
 }
 
-/* An attack from (ex, ey) lands on the player's tile. Returns 1 if parried. */
-static int player_hit(int ex, int ey, int damage) {
+/* An attack from (ex, ey) lands on the player's tile. */
+static void player_hit(int ex, int ey, int damage) {
 	if (player.state == P_DEAD)
-		return 0;
+		return;
 	if (player.state == P_DODGE && player.t >= IFRAME_FIRST && player.t <= IFRAME_LAST)
-		return 0;   /* rolled through it */
+		return;   /* rolled through it */
+	if (player.state == P_JUMP && player.t >= AIR_FIRST && player.t <= AIR_LAST)
+		return;   /* jumped over it */
 	int px, py;
 	player_tile(&px, &py);
-	int dx = ex - px, dy = ey - py, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
-	int facing_it = (adx >= ady && player.facing == (dx > 0 ? DIR_RIGHT : DIR_LEFT)) ||
-	                (ady >= adx && player.facing == (dy > 0 ? DIR_DOWN : DIR_UP));
-	int ready = player.state == P_IDLE;
-	if (ready && player.parry_t <= (parry_wide ? PARRY_WIDE : PARRY_WINDOW) && facing_it) {
-		player.parry_t = 999;
-		player.parried_t = 0;
-		shake_t = 6;
-		hitstop(6);
-		emit(EV_PARRY, ex, ey);
-		return 1;
-	}
-	if (ready && player.blocking) {
-		player.stamina -= BLOCK_COST;
-		player.stamina_wait = STAMINA_WAIT;
-		shake_t = 4;
-		emit(EV_BLOCK, px, py);
-		if (player.stamina >= 0)
-			return 0;   /* held */
-		player.stamina = 0;
-		player.state = P_STAGGER;   /* guard broken */
-		player.t = 0;
-		damage /= 2;
-	}
 	player.hp -= damage;
 	player.hurt_t = 0;
 	shake_t = 10;
 	hitstop(5);
 	emit(EV_HURT, px, py);
-	if (player.state == P_DRINK) {
-		player.state = P_IDLE;   /* the flask is spilled */
+	if (player.state == P_DRINK || player.state == P_CHARGE) {
+		player.state = P_IDLE;   /* the flask is spilled, the blow lost */
 		player.t = 0;
 	}
 	if (player.hp <= 0) {
 		player.hp = 0;
 		die();
 	}
-	return 0;
 }
 
 static int dir_of(uint16_t bits) {
@@ -271,14 +244,28 @@ static void face_nearest(void) {
 	else if (ady > adx) player.facing = bdy > 0 ? DIR_DOWN : DIR_UP;
 }
 
-static int try_attack(void) {
+/* The swing itself: light, or heavy after a full charge. */
+static int swing(int heavy) {
+	int cost = heavy ? HEAVY_COST : ATTACK_COST;
 	if (player.stamina <= 0)
 		return 0;
 	player.state = P_ATTACK;
+	player.heavy = heavy;
 	player.t = 0;
-	player.stamina -= ATTACK_COST;
+	player.stamina -= cost;
 	player.stamina_wait = STAMINA_WAIT;
 	emit(EV_SWING, player.x, player.y);
+	return 1;
+}
+
+static int try_jump(void) {
+	if (player.stamina <= 0)
+		return 0;
+	player.state = P_JUMP;
+	player.t = 0;
+	player.stamina -= JUMP_COST;
+	player.stamina_wait = STAMINA_WAIT;
+	emit(EV_JUMP, player.x, player.y);
 	return 1;
 }
 
@@ -288,39 +275,36 @@ static void sword_hits(void) {
 	if (i < 0)
 		return;
 	Enemy *e = &enemies[i];
-	int riposte = e->state == E_STAGGER;
-	e->hp -= ATTACK_DAMAGE * (riposte ? RIPOSTE_FACTOR : 1);
+	int heavy = player.heavy;
+	e->hp -= heavy ? HEAVY_DAMAGE : ATTACK_DAMAGE;
 	e->hit_t = 0;
-	shake_t = riposte ? 8 : 3;
-	hitstop(riposte ? 9 : 4);
-	emit(riposte ? EV_RIPOSTE : EV_HIT, tx, ty);
+	shake_t = heavy ? 8 : 3;
+	hitstop(heavy ? 9 : 4);
+	emit(heavy ? EV_HEAVY : EV_HIT, tx, ty);
 	if (e->hp <= 0) {
 		e->state = E_DYING;
 		e->t = 0;
 		absolution += HUSK_REWARD;
 		enemies_alive--;
 		emit(EV_KILL, tx, ty);
-	} else if (riposte) {
-		e->state = E_IDLE;
+	} else if (heavy) {
+		e->state = E_STAGGER;   /* the blow breaks its attack */
 		e->t = 0;
 	}
 }
 
-enum { BUF_NONE, BUF_DODGE, BUF_ATTACK };
+enum { BUF_NONE, BUF_DODGE, BUF_ATTACK, BUF_JUMP };
 
 static void update_player(const Input *in) {
 	Player *p = &player;
 	p->t++;
-	if (p->parry_t < 999) p->parry_t++;
 	if (p->hurt_t < 999) p->hurt_t++;
-	if (p->parried_t < 999) p->parried_t++;
 	if (p->buffer_t > 0 && --p->buffer_t == 0) p->buffered = BUF_NONE;
 	if (p->state == P_DEAD)
 		return;
 
 	/* The D-pad walks (screen directions: Up = away from the camera). */
 	int held_dir = dir_of(in->held);
-	if (in->pressed & PAD_SQUARE) p->parry_t = 0;
 
 	/* Wanted this frame (or buffered while busy). */
 	if (in->pressed & PAD_CIRCLE) {
@@ -328,8 +312,12 @@ static void update_player(const Input *in) {
 		p->buffer_t = BUFFER_FRAMES;
 		p->buffer_dir = held_dir;   /* a direction held: dodge that way, else away from the enemy */
 	}
-	if (in->pressed & PAD_CROSS) {
+	if (in->pressed & PAD_SQUARE) {
 		p->buffered = BUF_ATTACK;
+		p->buffer_t = BUFFER_FRAMES;
+	}
+	if (in->pressed & PAD_CROSS) {
+		p->buffered = BUF_JUMP;
 		p->buffer_t = BUFFER_FRAMES;
 	}
 
@@ -340,47 +328,63 @@ static void update_player(const Input *in) {
 	case P_WALK:
 		if (p->t >= WALK_FRAMES) { p->state = P_IDLE; p->t = 0; p->from_x = p->x; p->from_y = p->y; }
 		break;
+	case P_CHARGE:
+		/* Let go early: an ordinary swing, already that far along. Held to
+		 * the end: the heavy blow, on release. */
+		if (p->t == CHARGE_FULL) emit(EV_CHARGED, p->x, p->y);
+		if (!(in->held & PAD_SQUARE)) {
+			int t = p->t;
+			if (t >= CHARGE_FULL) swing(1);
+			else if (swing(0)) p->t = t < ATTACK_WINDUP - 1 ? t : ATTACK_WINDUP - 1;
+			else { p->state = P_IDLE; p->t = 0; }
+		}
+		break;
 	case P_ATTACK:
-		if (p->t == ATTACK_WINDUP) sword_hits();
-		if (p->t >= ATTACK_FRAMES) { p->state = P_IDLE; p->t = 0; }
+		if (p->t == (p->heavy ? HEAVY_WINDUP : ATTACK_WINDUP)) sword_hits();
+		if (p->t >= (p->heavy ? HEAVY_FRAMES : ATTACK_FRAMES)) { p->state = P_IDLE; p->t = 0; }
+		break;
+	case P_JUMP:
+		if (p->t == AIR_LAST + 1) emit(EV_LAND, p->x, p->y);
+		if (p->t >= JUMP_FRAMES) { p->state = P_IDLE; p->t = 0; }
 		break;
 	case P_DRINK:
 		if (p->t == DRINK_HEAL_AT) { p->hp = p->hp + FLASK_HEAL > HP_MAX ? HP_MAX : p->hp + FLASK_HEAL; emit(EV_HEAL, p->x, p->y); }
 		if (p->t >= DRINK_FRAMES) { p->state = P_IDLE; p->t = 0; }
 		break;
-	case P_STAGGER:
-		if (p->t >= GUARD_BREAK) { p->state = P_IDLE; p->t = 0; }
-		break;
 	}
 
 	if (p->state == P_IDLE) {
-		p->blocking = (in->held & PAD_SQUARE) != 0;
 		if (p->buffered == BUF_DODGE) {
 			try_dodge(p->buffer_dir >= 0 ? p->buffer_dir : (p->facing + 2) & 3);
 			p->buffered = BUF_NONE;
 		} else if (p->buffered == BUF_ATTACK) {
-			try_attack();
+			/* Square starts the charge; let go at once and it's a plain swing. */
+			if (p->stamina > 0) { p->state = P_CHARGE; p->t = 0; }
+			p->buffered = BUF_NONE;
+		} else if (p->buffered == BUF_JUMP) {
+			try_jump();
 			p->buffered = BUF_NONE;
 		} else if ((in->pressed & PAD_TRIANGLE) && p->flasks > 0) {
 			p->flasks--;
 			p->state = P_DRINK;
 			p->t = 0;
-		} else if (held_dir >= 0 && !p->blocking) {
+		} else if (held_dir >= 0) {
 			try_walk(held_dir);
 		}
-		if (p->state != P_IDLE) p->blocking = 0;
-	} else {
-		p->blocking = 0;
+	}
+	/* A charge started this frame sees the button already let go: swing. */
+	if (p->state == P_CHARGE && p->t == 0 && !(in->held & PAD_SQUARE)) {
+		if (!swing(0)) p->state = P_IDLE;
 	}
 
 	/* Always facing the nearest enemy, except mid-swing. */
 	if (p->state != P_ATTACK) face_nearest();
 
-	/* Stamina refills after a short pause, slowly while blocking. */
+	/* Stamina refills after a short pause. */
 	if (p->stamina_wait > 0) {
 		p->stamina_wait--;
-	} else if (p->state != P_ATTACK && p->state != P_DODGE) {
-		p->stamina += p->blocking ? BLOCK_REGEN : STAMINA_REGEN;
+	} else if (p->state != P_ATTACK && p->state != P_DODGE && p->state != P_JUMP && p->state != P_CHARGE) {
+		p->stamina += STAMINA_REGEN;
 		if (p->stamina > STAMINA_MAX * 16) p->stamina = STAMINA_MAX * 16;
 	}
 
@@ -475,11 +479,7 @@ static void update_enemy(Enemy *e) {
 	case E_WINDUP:
 		if (e->t >= e->windup) {
 			player_tile(&px, &py);
-			if (e->target[py * MAX_N + px] && player_hit(e->x, e->y, HUSK_DAMAGE)) {
-				e->state = E_STAGGER;   /* parried */
-				e->t = 0;
-				break;
-			}
+			if (e->target[py * MAX_N + px]) player_hit(e->x, e->y, HUSK_DAMAGE);
 			shake_t = shake_t > 3 ? shake_t : 3;
 			emit(EV_SLAM, e->x, e->y);
 			e->state = E_RECOVER;

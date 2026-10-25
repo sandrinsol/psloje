@@ -12,19 +12,18 @@
 /* ---- Settings ------------------------------------------------------------------------ */
 
 /* The actions the buttons can be mapped to (Options > Controls). */
-enum { ACT_ATTACK, ACT_DODGE, ACT_BLOCK, ACT_FLASK, ACT_SKILL1, ACT_SKILL2, NUM_ACTIONS };
+enum { ACT_ATTACK, ACT_DODGE, ACT_JUMP, ACT_FLASK, ACT_SKILL1, ACT_SKILL2, NUM_ACTIONS };
 
 typedef struct {
 	uint8_t music, sound;          /* 0..10 */
-	uint8_t parry_wide;            /* assist: 10-frame parry window instead of 6 */
 	uint8_t slow;                  /* assist: the game at 3/4 speed */
 	uint16_t keys[NUM_ACTIONS];    /* PAD_* button for each action */
 } Settings;
 
 extern Settings settings;
 void settings_defaults(void);
-/* Pad bits (as read) -> the game's own layout (Cross attack, Circle dodge,
- * Square block, Triangle flask, L1 / R1 skills); the D-pad and Start pass. */
+/* Pad bits (as read) -> the game's own layout (Square attack, Circle dodge,
+ * Cross jump, Triangle flask, L1 / R1 skills); the D-pad and Start pass. */
 uint16_t settings_map(uint16_t pad);
 
 /* ---- Drawing --------------------------------------------------------------------------- */
