@@ -1670,15 +1670,17 @@ uint8_t *draw_frame(uint32_t *ot_, uint8_t *prim_, uint8_t *end, int frame, int 
 	/* A cancelled walk can move the soul back to its tile: glide there
 	 * instead of popping (but jump when the floor starts again). */
 	{
-		static int32_t shown_x, shown_z, off_x, off_z;
-		int dx = soul_x + off_x - shown_x, dz = soul_z + off_z - shown_z;
+		/* (measure the soul's own move, not the glide's: a decaying glide
+		 * read as a pop would hold the soul still for a whole dodge) */
+		static int32_t last_x, last_z, off_x, off_z;
+		int dx = soul_x - last_x, dz = soul_z - last_z;
+		last_x = soul_x;
+		last_z = soul_z;
 		if (floor_t < 2 && floor_state == F_WAVE_INTRO && wave == 0) off_x = off_z = 0;
 		/* (a jump of more than a dodge moves in a frame: two tiles in 12, 43) */
-		else if (dx * dx + dz * dz > 60 * 60 && dx * dx + dz * dz < 400 * 400) { off_x = shown_x - soul_x; off_z = shown_z - soul_z; }
+		else if (dx * dx + dz * dz > 60 * 60 && dx * dx + dz * dz < 400 * 400) { off_x -= dx; off_z -= dz; }
 		soul_x += off_x;
 		soul_z += off_z;
-		shown_x = soul_x;
-		shown_z = soul_z;
 		off_x = off_x * 5 / 8;
 		off_z = off_z * 5 / 8;
 	}
